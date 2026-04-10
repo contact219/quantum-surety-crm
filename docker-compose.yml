@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  crm-backend:
+    build: ./backend
+    container_name: qs-crm-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://scraper:scraper2024@host.docker.internal:5433/minority_contractors
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - PORT=4000
+    ports:
+      - "4001:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  crm-frontend:
+    build: ./frontend
+    container_name: qs-crm-frontend
+    restart: unless-stopped
+    ports:
+      - "8095:80"
+    depends_on:
+      - crm-backend
