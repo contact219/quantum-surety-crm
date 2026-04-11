@@ -1,15 +1,17 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, Mail, Upload } from 'lucide-react';
+import { LayoutDashboard, Users, Mail, Upload, FileText } from 'lucide-react';
 import Dashboard from './pages/Dashboard.jsx';
 import Contacts from './pages/Contacts.jsx';
 import Campaigns from './pages/Campaigns.jsx';
 import ImportPage from './pages/Import.jsx';
+import Notaries from './pages/Notaries.jsx';
 
 const nav = [
   {to:'/',icon:LayoutDashboard,label:'Dashboard'},
   {to:'/contacts',icon:Users,label:'Contacts'},
   {to:'/campaigns',icon:Mail,label:'Campaigns'},
+  {to:'/notaries',icon:FileText,label:'Notary Bonds'},
   {to:'/import',icon:Upload,label:'Import'},
 ];
 
@@ -38,6 +40,7 @@ export default function App() {
           <Route path="/" element={<Dashboard/>}/>
           <Route path="/contacts" element={<Contacts/>}/>
           <Route path="/campaigns" element={<Campaigns/>}/>
+          <Route path="/notaries" element={<Notaries/>}/>
           <Route path="/import" element={<ImportPage/>}/>
         </Routes>
       </main>

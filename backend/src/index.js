@@ -4,6 +4,8 @@ import { contactsRouter } from './routes/contacts.js';
 import { emailRouter } from './routes/email.js';
 import { importRouter } from './routes/import.js';
 import { campaignsRouter } from './routes/campaigns.js';
+import { notariesRouter } from './routes/notaries.js';
+import { notaryCampaignsRouter } from './routes/notary-campaigns.js';
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -13,4 +15,6 @@ app.use('/api/contacts', contactsRouter);
 app.use('/api/email', emailRouter);
 app.use('/api/import', importRouter);
 app.use('/api/campaigns', campaignsRouter);
+app.use('/api/notaries', notariesRouter);
+app.use('/api/notary-campaigns', notaryCampaignsRouter);
 app.listen(process.env.PORT || 4000, () => console.log('CRM backend running'));
