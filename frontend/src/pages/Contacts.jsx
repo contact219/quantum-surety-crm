@@ -65,7 +65,7 @@ export default function Contacts() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{borderColor:'var(--border)'}}>
-                {['Company','City','State','Cert','Contact','Phone'].map(h=>(
+                {['Company','City','State','Cert','Contact','Phone','Fax'].map(h=>(
                   <th key={h} className="text-left px-4 py-3 text-xs font-mono tracking-wider" style={{color:'var(--text-dim)'}}>{h.toUpperCase()}</th>
                 ))}
               </tr>
@@ -83,6 +83,7 @@ export default function Contacts() {
                     {row.contact_email||row.contact_website||'—'}
                   </td>
                   <td className="px-4 py-3 text-xs font-mono" style={{color:'var(--text-dim)'}}>{row.phone||'—'}</td>
+                  <td className="px-4 py-3 text-xs font-mono" style={{color:'var(--text-dim)'}}>{row.fax&&row.fax!=='M'?row.fax:'—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -120,6 +121,7 @@ export default function Contacts() {
               ['Address',`${selected.address||''} ${selected.address2||''}`.trim()||'—'],
               ['City/Zip',`${selected.city||''} ${selected.zip||''}`.trim()||'—'],
               ['Phone',selected.phone||'—'],
+              ['Fax',selected.fax&&selected.fax!=='M'?selected.fax:'—'],
               ['Email',selected.contact_email||'—'],
               ['Website',selected.contact_website||'—'],
               ['NAICS',selected.naics_codes||'—'],
