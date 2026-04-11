@@ -113,8 +113,6 @@ export default function App() {
         }
       `}</style>
 
-      <Sidebar/>
-
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
         {/* Mobile header */}
         <div className="mobile-header" style={{display:'none',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderBottom:'1px solid var(--border)',background:'var(--surface)',flexShrink:0}}>
