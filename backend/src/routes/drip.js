@@ -140,7 +140,7 @@ dripRouter.post('/run', async (req, res) => {
 
 // Alert: notaries expiring in 30 days - send digest to owner
 dripRouter.post('/alert', async (req, res) => {
-  const { to_email = 'tsparks@quantumsurety.bond' } = req.body;
+  const { to_email = 'administrator@quantumsurety.bond' } = req.body;
   try {
     const result = await db.execute(sql`
       SELECT first_name, last_name, email, city, expire_date, surety_company

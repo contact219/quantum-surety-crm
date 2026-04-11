@@ -98,7 +98,7 @@ export default function Dashboard() {
 
   const sendAlert = async() => {
     setAlertSending(true);setAlertResult('');
-    const r = await fetch('/api/drip/alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to_email:'tsparks@quantumsurety.bond'})});
+    const r = await fetch('/api/drip/alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to_email:'administrator@quantumsurety.bond'})});
     const j = await r.json();
     setAlertSending(false);
     setAlertResult(j.message||`Sent digest with ${j.count} notaries to ${j.sent_to}`);
