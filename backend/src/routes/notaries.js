@@ -37,21 +37,50 @@ notariesRouter.get('/companies', async (req, res) => {
 notariesRouter.get('/', async (req, res) => {
   try {
     const { page=1, limit=50, search='', city='', surety='', expiring='', has_email='' } = req.query;
-    const offset = (parseInt(page)-1)*parseInt(limit);
-    let where = 'WHERE 1=1';
-    const params = [];
-    let i = 1;
-    if (search)           { where += ` AND (first_name ILIKE $${i} OR last_name ILIKE $${i} OR email ILIKE $${i})`; params.push(`%${search}%`); i++; }
-    if (city)             { where += ` AND city ILIKE $${i}`; params.push(`%${city}%`); i++; }
-    if (surety)           { where += ` AND surety_company ILIKE $${i}`; params.push(`%${surety}%`); i++; }
-    if (has_email==='true') where += ` AND email != '' AND email IS NOT NULL`;
-    if (expiring==='90')  where += ` AND expire_date <= CURRENT_DATE + INTERVAL '90 days' AND expire_date >= CURRENT_DATE`;
-    if (expiring==='180') where += ` AND expire_date <= CURRENT_DATE + INTERVAL '180 days' AND expire_date >= CURRENT_DATE`;
-    if (expiring==='expired') where += ` AND expire_date < CURRENT_DATE`;
-    const [rows, cnt] = await Promise.all([
-      db.execute(sql.raw(`SELECT id,notary_id,first_name,last_name,email,city,zip,expire_date,surety_company,agency FROM notaries ${where} ORDER BY expire_date ASC LIMIT ${parseInt(limit)} OFFSET ${offset}`, params)),
-      db.execute(sql.raw(`SELECT COUNT(*) as count FROM notaries ${where}`, params)),
+    const offset = (parseInt(page)-1) * parseInt(limit);
+    const lim = parseInt(limit);
+
+    // Build query using drizzle sql template tag with safe interpolation
+    const searchPct = `%${search}%`;
+    const cityPct = `%${city}%`;
+    const suretyPct = `%${surety}%`;
+
+    let rows, cnt;
+
+    // Use conditional sql fragments
+    const searchCond = search ? sql`AND (first_name ILIKE ${searchPct} OR last_name ILIKE ${searchPct} OR email ILIKE ${searchPct})` : sql``;
+    const cityCond   = city   ? sql`AND city ILIKE ${cityPct}` : sql``;
+    const suretyCond = surety ? sql`AND surety_company ILIKE ${suretyPct}` : sql``;
+    const emailCond  = has_email === 'true' ? sql`AND email != '' AND email IS NOT NULL` : sql``;
+    const expCond    = expiring === '90'      ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '90 days' AND expire_date >= CURRENT_DATE`
+                     : expiring === '180'     ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '180 days' AND expire_date >= CURRENT_DATE`
+                     : expiring === 'expired' ? sql`AND expire_date < CURRENT_DATE`
+                     : sql``;
+
+    [rows, cnt] = await Promise.all([
+      db.execute(sql`
+        SELECT id, notary_id, first_name, last_name, email, city, zip, expire_date, surety_company, agency
+        FROM notaries
+        WHERE 1=1
+        ${searchCond} ${cityCond} ${suretyCond} ${emailCond} ${expCond}
+        ORDER BY expire_date ASC
+        LIMIT ${lim} OFFSET ${offset}
+      `),
+      db.execute(sql`
+        SELECT COUNT(*) as count FROM notaries
+        WHERE 1=1
+        ${searchCond} ${cityCond} ${suretyCond} ${emailCond} ${expCond}
+      `),
     ]);
-    res.json({ data:rows.rows, total:parseInt(cnt.rows[0].count), page:parseInt(page), pages:Math.ceil(parseInt(cnt.rows[0].count)/parseInt(limit)) });
-  } catch(err) { console.error(err); res.status(500).json({ error: err.message }); }
+
+    res.json({
+      data: rows.rows,
+      total: parseInt(cnt.rows[0].count),
+      page: parseInt(page),
+      pages: Math.ceil(parseInt(cnt.rows[0].count) / lim),
+    });
+  } catch(err) {
+    console.error('Notaries query error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });

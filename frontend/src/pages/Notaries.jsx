@@ -1,11 +1,11 @@
-import React,{useEffect,useState,useCallback} from 'react';
-import {Search,Mail,MapPin,ChevronLeft,ChevronRight,Send,X,Filter,AlertTriangle,Clock,CheckCircle,Users} from 'lucide-react';
+import React,{useEffect,useState,useCallback,useRef} from 'react';
+import {Search,Mail,MapPin,ChevronLeft,ChevronRight,Send,X,AlertTriangle,Clock,CheckCircle,Users} from 'lucide-react';
 
 const EXPIRY_OPTIONS = [
-  {value:'',label:'All'},
-  {value:'90',label:'Expiring 90 days',color:'#ef4444'},
-  {value:'180',label:'Expiring 180 days',color:'#f97316'},
-  {value:'expired',label:'Already expired',color:'#6B6B8A'},
+  {value:'',label:'All Expiry'},
+  {value:'90',label:'Expiring 90 days'},
+  {value:'180',label:'Expiring 180 days'},
+  {value:'expired',label:'Already expired'},
 ];
 
 const NOTARY_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:32px 24px;background:#ffffff">
@@ -19,7 +19,7 @@ const NOTARY_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;m
     <p style="margin:0 0 10px;font-weight:bold;color:#0A0A0F">Renew with Quantum Surety — Starting at $30/year</p>
     <p style="margin:4px 0;color:#333;font-size:14px">✓ Instant online issuance — certificate emailed immediately</p>
     <p style="margin:4px 0;color:#333;font-size:14px">✓ RLI Insurance Company — Texas approved carrier</p>
-    <p style="margin:4px 0;color:#333;font-size:14px">✓ 4-year term available — bond once, done for your full commission</p>
+    <p style="margin:4px 0;color:#333;font-size:14px">✓ 4-year term available — bond once for your full commission</p>
     <p style="margin:4px 0;color:#333;font-size:14px">✓ 55% commission if you refer other notaries</p>
   </div>
   <a href="https://quantumsurety.bond/quote" style="background:#C9A84C;color:#000;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-family:Arial,sans-serif;font-size:15px">Renew My Bond Now →</a>
@@ -29,70 +29,135 @@ const NOTARY_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;m
 
 export default function Notaries() {
   const [stats,setStats]=useState(null);
-  const [data,setData]=useState({data:[],total:0,pages:1});
+  const [rows,setRows]=useState([]);
+  const [total,setTotal]=useState(0);
+  const [pages,setPages]=useState(1);
   const [page,setPage]=useState(1);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState('');
+
+  // Filters — use refs for inputs to avoid re-render on every keystroke
   const [search,setSearch]=useState('');
   const [city,setCity]=useState('');
   const [surety,setSurety]=useState('');
-  const [expiring,setExpiring]=useState('90');
-  const [hasEmail,setHasEmail]=useState(true);
+  const [expiring,setExpiring]=useState('');
+  const [hasEmail,setHasEmail]=useState(false);
+  const searchTimer = useRef(null);
+
   const [companies,setCompanies]=useState([]);
   const [showCampaign,setShowCampaign]=useState(false);
-  const [campaignForm,setCampaignForm]=useState({subject:'{{first_name}}, Your Texas Notary Bond Expires {{expire_date}}',body:NOTARY_TEMPLATE,from_name:'Quantum Surety',from_email:'info@quantumsurety.bond'});
+  const [campaignForm,setCampaignForm]=useState({
+    subject:'{{first_name}}, Your Texas Notary Bond Expires {{expire_date}}',
+    body:NOTARY_TEMPLATE,
+    from_name:'Quantum Surety',
+    from_email:'info@quantumsurety.bond'
+  });
   const [preview,setPreview]=useState(false);
   const [audienceCount,setAudienceCount]=useState(null);
   const [sending,setSending]=useState(false);
   const [sendResult,setSendResult]=useState(null);
 
   useEffect(()=>{
-    fetch('/api/notaries/stats').then(r=>r.json()).then(setStats);
-    fetch('/api/notaries/companies').then(r=>r.json()).then(setCompanies);
+    fetch('/api/notaries/stats')
+      .then(r=>r.json())
+      .then(setStats)
+      .catch(()=>{});
+    fetch('/api/notaries/companies')
+      .then(r=>r.json())
+      .then(setCompanies)
+      .catch(()=>{});
   },[]);
 
   const load = useCallback(()=>{
-    const p=new URLSearchParams({page,limit:50,search,city,surety,expiring,has_email:hasEmail?'true':''});
-    fetch(`/api/notaries?${p}`).then(r=>r.json()).then(setData);
+    setLoading(true);
+    setError('');
+    const p=new URLSearchParams({
+      page, limit:50,
+      search, city, surety, expiring,
+      has_email: hasEmail?'true':''
+    });
+    fetch(`/api/notaries?${p}`)
+      .then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(j=>{
+        setRows(Array.isArray(j.data)?j.data:[]);
+        setTotal(j.total||0);
+        setPages(j.pages||1);
+        setLoading(false);
+      })
+      .catch(e=>{
+        setError(e.message);
+        setRows([]);
+        setLoading(false);
+      });
   },[page,search,city,surety,expiring,hasEmail]);
 
   useEffect(()=>{load();},[load]);
   useEffect(()=>{setPage(1);},[search,city,surety,expiring,hasEmail]);
 
-  // Live audience count for campaign
+  // Debounced text inputs
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(()=>setSearch(val), 400);
+  };
+  const handleCityChange = (e) => {
+    const val = e.target.value;
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(()=>setCity(val), 400);
+  };
+
   useEffect(()=>{
     if(!showCampaign) return;
     setAudienceCount(null);
     fetch('/api/notary-campaigns/count',{
-      method:'POST',headers:{'Content-Type':'application/json'},
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
       body:JSON.stringify({filters:{surety,city,expiring}})
-    }).then(r=>r.json()).then(j=>setAudienceCount(j.count));
+    })
+      .then(r=>r.json())
+      .then(j=>setAudienceCount(j.count||0))
+      .catch(()=>setAudienceCount(0));
   },[showCampaign,surety,city,expiring]);
 
-  const sendCampaign = async() => {
+  const sendCampaign = async()=>{
     setSending(true);setSendResult(null);
-    const r = await fetch('/api/notary-campaigns/send',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({...campaignForm,filters:{surety,city,expiring}})
-    });
-    const j = await r.json();
+    try {
+      const r=await fetch('/api/notary-campaigns/send',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({...campaignForm,filters:{surety,city,expiring}})
+      });
+      const j=await r.json();
+      setSendResult(j);
+    } catch(e){ setSendResult({error:e.message}); }
     setSending(false);setShowCampaign(false);
-    setSendResult(j);
   };
 
-  const expiryColor = (date) => {
-    if (!date) return 'var(--text-dim)';
-    const d = new Date(date);
-    const now = new Date();
-    const days = Math.round((d-now)/(1000*60*60*24));
-    if (days < 0) return '#6B6B8A';
-    if (days <= 90) return '#ef4444';
-    if (days <= 180) return '#f97316';
+  const expiryColor=(date)=>{
+    if(!date) return 'var(--text-dim)';
+    const days=Math.round((new Date(date)-new Date())/(1000*60*60*24));
+    if(days<0) return '#6B6B8A';
+    if(days<=90) return '#ef4444';
+    if(days<=180) return '#f97316';
     return '#4CC97A';
   };
 
-  const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+  const formatDate=(d)=>{
+    if(!d) return '—';
+    try { return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+    catch(e){ return d; }
+  };
+
+  const daysLeft=(date)=>{
+    if(!date) return null;
+    return Math.round((new Date(date)-new Date())/(1000*60*60*24));
+  };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div style={{display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+
       {/* Header */}
       <div className="px-6 pt-6 pb-4 border-b flex-shrink-0" style={{borderColor:'var(--border)'}}>
         <div className="text-xs font-mono tracking-widest mb-1" style={{color:'var(--gold)'}}>NOTARY BONDS</div>
@@ -105,15 +170,15 @@ export default function Notaries() {
           </button>
         </div>
 
-        {/* Stats row */}
+        {/* Stats */}
         {stats&&(
           <div className="grid grid-cols-5 gap-3 mb-4">
             {[
-              {label:'Total Notaries',val:parseInt(stats.total).toLocaleString(),icon:Users,color:'var(--gold)'},
-              {label:'With Email',val:parseInt(stats.with_email).toLocaleString(),icon:Mail,color:'#4C9AC9'},
-              {label:'Expiring 90d',val:parseInt(stats.expiring_90).toLocaleString(),icon:AlertTriangle,color:'#ef4444'},
-              {label:'Expiring 180d',val:parseInt(stats.expiring_180).toLocaleString(),icon:Clock,color:'#f97316'},
-              {label:'Competitor Bonded',val:parseInt(stats.competitor_bonded).toLocaleString(),icon:CheckCircle,color:'#4CC97A'},
+              {label:'Total',val:parseInt(stats.total||0).toLocaleString(),icon:Users,color:'var(--gold)'},
+              {label:'With Email',val:parseInt(stats.with_email||0).toLocaleString(),icon:Mail,color:'#4C9AC9'},
+              {label:'Expiring 90d',val:parseInt(stats.expiring_90||0).toLocaleString(),icon:AlertTriangle,color:'#ef4444'},
+              {label:'Expiring 180d',val:parseInt(stats.expiring_180||0).toLocaleString(),icon:Clock,color:'#f97316'},
+              {label:'Competitor',val:parseInt(stats.competitor_bonded||0).toLocaleString(),icon:CheckCircle,color:'#4CC97A'},
             ].map(({label,val,icon:Icon,color})=>(
               <div key={label} className="rounded-lg p-3 border" style={{background:'var(--surface)',borderColor:'var(--border)'}}>
                 <div className="flex items-center justify-between mb-1">
@@ -130,23 +195,29 @@ export default function Notaries() {
         <div className="flex gap-2 flex-wrap items-center">
           <div className="relative">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{color:'var(--text-dim)'}}/>
-            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name or email..."
+            <input
+              defaultValue={search}
+              onChange={handleSearchChange}
+              placeholder="Name or email..."
               className="pl-8 pr-3 py-1.5 rounded-lg text-sm border outline-none w-44"
               style={{background:'var(--surface)',borderColor:'var(--border)',color:'var(--text)'}}/>
           </div>
           <div className="relative">
             <MapPin size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{color:'var(--text-dim)'}}/>
-            <input value={city} onChange={e=>setCity(e.target.value)} placeholder="City..."
+            <input
+              defaultValue={city}
+              onChange={handleCityChange}
+              placeholder="City..."
               className="pl-8 pr-3 py-1.5 rounded-lg text-sm border outline-none w-32"
               style={{background:'var(--surface)',borderColor:'var(--border)',color:'var(--text)'}}/>
           </div>
           <select value={surety} onChange={e=>setSurety(e.target.value)}
-            className="px-2 py-1.5 rounded-lg text-sm border outline-none max-w-48"
-            style={{background:'var(--surface)',borderColor:'var(--border)',color:'var(--text)'}}>
+            className="px-2 py-1.5 rounded-lg text-sm border outline-none"
+            style={{background:'var(--surface)',borderColor:'var(--border)',color:'var(--text)',maxWidth:'220px'}}>
             <option value="">All Companies</option>
             {companies.map(c=>(
               <option key={c.surety_company} value={c.surety_company}>
-                {c.surety_company.slice(0,35)} ({parseInt(c.count).toLocaleString()})
+                {(c.surety_company||'').slice(0,35)} ({parseInt(c.count||0).toLocaleString()})
               </option>
             ))}
           </select>
@@ -156,32 +227,45 @@ export default function Notaries() {
             {EXPIRY_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
           <button onClick={()=>setHasEmail(v=>!v)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium border"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all"
             style={{background:hasEmail?'rgba(76,154,201,0.15)':'transparent',borderColor:hasEmail?'#4C9AC9':'var(--border)',color:hasEmail?'#4C9AC9':'var(--text-dim)'}}>
             Email only
           </button>
+          {(search||city||surety||expiring||hasEmail)&&(
+            <button onClick={()=>{setSearch('');setCity('');setSurety('');setExpiring('');setHasEmail(false);}}
+              className="flex items-center gap-1 text-xs px-2 py-1.5 rounded"
+              style={{color:'var(--text-dim)',background:'var(--muted)'}}>
+              <X size={10}/> Clear
+            </button>
+          )}
           <span className="ml-auto text-xs font-mono" style={{color:'var(--text-dim)'}}>
-            {data.total.toLocaleString()} results
+            {loading?'Loading...':total.toLocaleString()+' results'}
           </span>
         </div>
       </div>
 
       {sendResult&&(
-        <div className="mx-6 mt-3 p-3 rounded-lg border flex items-center justify-between text-sm"
+        <div className="mx-6 mt-3 p-3 rounded-lg border flex items-center justify-between text-sm flex-shrink-0"
           style={{background:'#1a2e1a',borderColor:'#2a5a2a'}}>
           <span className="text-green-400">✓ Sent {sendResult.sent} · Failed {sendResult.failed}</span>
           <button onClick={()=>setSendResult(null)} style={{color:'var(--text-dim)'}}><X size={13}/></button>
         </div>
       )}
 
+      {error&&(
+        <div className="mx-6 mt-3 p-3 rounded-lg text-sm flex-shrink-0" style={{background:'#2e1a1a',color:'#f87171'}}>
+          Error: {error}
+        </div>
+      )}
+
       {/* Table */}
-      <div className="flex-1 overflow-auto">
+      <div style={{flex:1,overflowY:'auto'}}>
         <table className="w-full text-sm" style={{tableLayout:'fixed'}}>
           <colgroup>
-            <col style={{width:'18%'}}/><col style={{width:'18%'}}/><col style={{width:'12%'}}/>
-            <col style={{width:'11%'}}/><col style={{width:'11%'}}/><col style={{width:'30%'}}/>
+            <col style={{width:'14%'}}/><col style={{width:'14%'}}/><col style={{width:'12%'}}/>
+            <col style={{width:'12%'}}/><col style={{width:'10%'}}/><col style={{width:'38%'}}/>
           </colgroup>
-          <thead className="sticky top-0" style={{background:'var(--dark)'}}>
+          <thead style={{position:'sticky',top:0,background:'var(--dark)',zIndex:1}}>
             <tr className="border-b" style={{borderColor:'var(--border)'}}>
               {['First Name','Last Name','City','Expires','Status','Surety Company'].map(h=>(
                 <th key={h} className="text-left px-3 py-3 text-xs font-mono tracking-wider" style={{color:'var(--text-dim)'}}>{h.toUpperCase()}</th>
@@ -189,32 +273,36 @@ export default function Notaries() {
             </tr>
           </thead>
           <tbody>
-            {data.data.map(row=>{
-              const daysLeft = row.expire_date ? Math.round((new Date(row.expire_date)-new Date())/(1000*60*60*24)) : null;
+            {!loading && rows.map((row,idx)=>{
+              const dl = daysLeft(row.expire_date);
+              const color = expiryColor(row.expire_date);
               return (
-                <tr key={row.id} className="border-b hover:bg-white/5 cursor-default"
-                  style={{borderColor:'var(--border)'}}>
-                  <td className="px-3 py-2.5 text-white truncate">{row.first_name}</td>
-                  <td className="px-3 py-2.5 text-white truncate">{row.last_name}</td>
-                  <td className="px-3 py-2.5 truncate" style={{color:'var(--text-dim)'}}>{row.city}</td>
-                  <td className="px-3 py-2.5 text-xs font-mono" style={{color:expiryColor(row.expire_date)}}>
-                    {formatDate(row.expire_date)}
-                  </td>
+                <tr key={row.id||idx} className="border-b" style={{borderColor:'var(--border)'}}>
+                  <td className="px-3 py-2.5 text-white truncate">{row.first_name||'—'}</td>
+                  <td className="px-3 py-2.5 text-white truncate">{row.last_name||'—'}</td>
+                  <td className="px-3 py-2.5 truncate" style={{color:'var(--text-dim)'}}>{row.city||'—'}</td>
+                  <td className="px-3 py-2.5 text-xs font-mono" style={{color}}>{formatDate(row.expire_date)}</td>
                   <td className="px-3 py-2.5">
-                    {daysLeft!==null&&(
+                    {dl!==null&&(
                       <span className="text-xs px-1.5 py-0.5 rounded font-mono"
                         style={{
-                          background:daysLeft<0?'rgba(107,107,138,0.2)':daysLeft<=90?'rgba(239,68,68,0.15)':daysLeft<=180?'rgba(249,115,22,0.15)':'rgba(76,201,122,0.15)',
-                          color:daysLeft<0?'#6B6B8A':daysLeft<=90?'#ef4444':daysLeft<=180?'#f97316':'#4CC97A'
+                          background:dl<0?'rgba(107,107,138,0.2)':dl<=90?'rgba(239,68,68,0.15)':dl<=180?'rgba(249,115,22,0.15)':'rgba(76,201,122,0.15)',
+                          color:dl<0?'#6B6B8A':dl<=90?'#ef4444':dl<=180?'#f97316':'#4CC97A'
                         }}>
-                        {daysLeft<0?'Expired':`${daysLeft}d`}
+                        {dl<0?'Expired':`${dl}d`}
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 text-xs truncate" style={{color:'var(--text-dim)'}}>{row.surety_company}</td>
+                  <td className="px-3 py-2.5 text-xs truncate" style={{color:'var(--text-dim)'}}>{row.surety_company||'—'}</td>
                 </tr>
               );
             })}
+            {loading&&(
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-sm" style={{color:'var(--text-dim)'}}>Loading...</td></tr>
+            )}
+            {!loading&&rows.length===0&&(
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-sm" style={{color:'var(--text-dim)'}}>No results found</td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -222,52 +310,51 @@ export default function Notaries() {
       {/* Pagination */}
       <div className="flex items-center justify-between px-6 py-3 border-t flex-shrink-0" style={{borderColor:'var(--border)'}}>
         <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}
-          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded disabled:opacity-30" style={{color:'var(--text-dim)'}}>
+          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded disabled:opacity-30"
+          style={{color:'var(--text-dim)'}}>
           <ChevronLeft size={14}/> Prev
         </button>
-        <span className="text-xs font-mono" style={{color:'var(--text-dim)'}}>Page {page} of {data.pages.toLocaleString()}</span>
-        <button onClick={()=>setPage(p=>Math.min(data.pages,p+1))} disabled={page>=data.pages}
-          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded disabled:opacity-30" style={{color:'var(--text-dim)'}}>
+        <span className="text-xs font-mono" style={{color:'var(--text-dim)'}}>
+          Page {page} of {pages.toLocaleString()}
+        </span>
+        <button onClick={()=>setPage(p=>Math.min(pages,p+1))} disabled={page>=pages}
+          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded disabled:opacity-30"
+          style={{color:'var(--text-dim)'}}>
           Next <ChevronRight size={14}/>
         </button>
       </div>
 
       {/* Campaign modal */}
       {showCampaign&&(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(0,0,0,0.85)'}}>
-          <div className="w-full max-w-2xl rounded-2xl border flex flex-col" style={{background:'var(--surface)',borderColor:'var(--border)',maxHeight:'90vh'}}>
-            <div className="p-5 border-b flex items-center justify-between" style={{borderColor:'var(--border)'}}>
+        <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',alignItems:'center',justifyContent:'center',padding:'1rem',background:'rgba(0,0,0,0.85)'}}>
+          <div style={{width:'100%',maxWidth:'640px',borderRadius:'1rem',border:'1px solid var(--border)',background:'var(--surface)',display:'flex',flexDirection:'column',maxHeight:'90vh'}}>
+            <div className="p-5 border-b flex items-center justify-between flex-shrink-0" style={{borderColor:'var(--border)'}}>
               <div className="font-display text-2xl tracking-wider text-white">Notary Campaign</div>
               <button onClick={()=>setShowCampaign(false)} style={{color:'var(--text-dim)'}}><X size={18}/></button>
             </div>
-            <div className="flex-1 overflow-auto p-5 space-y-4">
-              {/* Audience summary */}
+            <div style={{flex:1,overflowY:'auto',padding:'1.25rem',display:'flex',flexDirection:'column',gap:'1rem'}}>
               <div className="rounded-lg p-4 border" style={{background:'var(--muted)',borderColor:'var(--border)'}}>
-                <div className="text-xs font-mono tracking-wider mb-2" style={{color:'var(--gold)'}}>CURRENT AUDIENCE (from active filters)</div>
-                <div className="flex gap-4 flex-wrap text-xs font-mono" style={{color:'var(--text-dim)'}}>
-                  {expiring&&<span>Expiry: {EXPIRY_OPTIONS.find(o=>o.value===expiring)?.label}</span>}
-                  {surety&&<span>Company: {surety.slice(0,30)}</span>}
-                  {city&&<span>City: {city}</span>}
-                  <span className="font-medium" style={{color:'var(--gold)'}}>
-                    → {audienceCount===null?'Counting...':audienceCount.toLocaleString()} contacts with email
+                <div className="text-xs font-mono tracking-wider mb-2" style={{color:'var(--gold)'}}>AUDIENCE (current filters)</div>
+                <div className="text-xs font-mono" style={{color:'var(--text-dim)'}}>
+                  {expiring&&<span className="mr-3">Expiry: {EXPIRY_OPTIONS.find(o=>o.value===expiring)?.label}</span>}
+                  {surety&&<span className="mr-3">Company: {surety.slice(0,25)}</span>}
+                  {city&&<span className="mr-3">City: {city}</span>}
+                  <span style={{color:'var(--gold)'}}>
+                    → {audienceCount===null?'Counting...':(audienceCount||0).toLocaleString()} contacts with email
                   </span>
                 </div>
               </div>
-
-              {/* Available variables */}
               <div className="text-xs font-mono p-3 rounded-lg" style={{background:'var(--muted)',color:'var(--text-dim)'}}>
-                Variables: <span style={{color:'var(--gold)'}}>{'{{first_name}}'}</span> · <span style={{color:'var(--gold)'}}>{'{{name}}'}</span> · <span style={{color:'var(--gold)'}}>{'{{expire_date}}'}</span> · <span style={{color:'var(--gold)'}}>{'{{surety_company}}'}</span>
+                Variables: <span style={{color:'var(--gold)'}}>{'{{first_name}}'}</span> · <span style={{color:'var(--gold)'}}>{'{{expire_date}}'}</span> · <span style={{color:'var(--gold)'}}>{'{{surety_company}}'}</span>
               </div>
-
-              {[['Subject','subject','text'],['From Name','from_name','text'],['From Email','from_email','email']].map(([label,key,type])=>(
+              {[['Subject','subject'],['From Name','from_name'],['From Email','from_email']].map(([label,key])=>(
                 <div key={key}>
                   <label className="text-xs font-mono tracking-wider block mb-1.5" style={{color:'var(--text-dim)'}}>{label.toUpperCase()}</label>
-                  <input type={type} value={campaignForm[key]} onChange={e=>setCampaignForm(f=>({...f,[key]:e.target.value}))}
+                  <input value={campaignForm[key]} onChange={e=>setCampaignForm(f=>({...f,[key]:e.target.value}))}
                     className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
                     style={{background:'var(--muted)',borderColor:'var(--border)',color:'var(--text)'}}/>
                 </div>
               ))}
-
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-mono tracking-wider" style={{color:'var(--text-dim)'}}>EMAIL BODY (HTML)</label>
@@ -276,22 +363,21 @@ export default function Notaries() {
                   </button>
                 </div>
                 {preview
-                  ? <div className="rounded-lg border overflow-auto bg-white" style={{borderColor:'var(--border)',maxHeight:'280px'}}
-                      dangerouslySetInnerHTML={{__html:campaignForm.body.replace(/{{first_name}}/g,'Sarah').replace(/{{name}}/g,'Sarah Johnson').replace(/{{expire_date}}/g,'July 12, 2026').replace(/{{surety_company}}/g,'Western Surety Company')}}/>
+                  ? <div style={{borderRadius:'0.5rem',border:'1px solid var(--border)',overflow:'auto',background:'white',maxHeight:'260px'}}
+                      dangerouslySetInnerHTML={{__html:campaignForm.body.replace(/{{first_name}}/g,'Sarah').replace(/{{expire_date}}/g,'July 12, 2026').replace(/{{surety_company}}/g,'Western Surety Company')}}/>
                   : <textarea value={campaignForm.body} onChange={e=>setCampaignForm(f=>({...f,body:e.target.value}))} rows={8}
                       className="w-full px-3 py-2 rounded-lg border text-xs outline-none resize-none font-mono"
                       style={{background:'var(--muted)',borderColor:'var(--border)',color:'var(--text)'}}/>
                 }
               </div>
             </div>
-
-            <div className="p-5 border-t flex gap-3 justify-end" style={{borderColor:'var(--border)'}}>
+            <div className="p-5 border-t flex gap-3 justify-end flex-shrink-0" style={{borderColor:'var(--border)'}}>
               <button onClick={()=>setShowCampaign(false)} className="px-4 py-2 rounded-lg text-sm" style={{color:'var(--text-dim)'}}>Cancel</button>
               <button onClick={sendCampaign} disabled={sending||!audienceCount}
                 className="flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
                 style={{background:'var(--gold)',color:'#0A0A0F'}}>
                 <Send size={13}/>
-                {sending?'Sending...':`Send to ${audienceCount?.toLocaleString()||'...'} notaries`}
+                {sending?'Sending...':`Send to ${(audienceCount||0).toLocaleString()} notaries`}
               </button>
             </div>
           </div>
