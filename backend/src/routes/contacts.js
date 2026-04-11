@@ -27,7 +27,7 @@ contactsRouter.get('/', async (req, res) => {
     if (state)     conds.push(eq(contractors.state, state));
     if (city)      conds.push(ilike(contractors.city, `%${city}%`));
     if (has_email === 'true') conds.push(sql`(${contractors.website} ~ '^[^@]+@[^@]+\\.[^@]+$')`);
-    if (has_fax === 'true')   conds.push(sql`(${contractors.fax} IS NOT NULL AND ${contractors.fax} ~ '[0-9]{7}')`);
+    if (has_fax === 'true')   conds.push(sql`(${contractors.fax} IS NOT NULL AND ${contractors.fax} != '' AND ${contractors.fax} != 'M' AND ${contractors.fax} != 'Y' AND ${contractors.fax} != 'F' AND length(${contractors.fax}) > 6)`);
 
     const where = conds.length ? and(...conds) : undefined;
 
@@ -81,7 +81,7 @@ contactsRouter.get('/stats', async (req, res) => {
       db.select({count: sql`count(*)`}).from(contractors)
         .where(sql`${contractors.phone} IS NOT NULL AND ${contractors.phone} != ''`),
       db.select({count: sql`count(*)`}).from(contractors)
-        .where(sql`${contractors.fax} ~ '[0-9]{7}'`),
+        .where(sql`(${contractors.fax} IS NOT NULL AND ${contractors.fax} != '' AND ${contractors.fax} != 'M' AND ${contractors.fax} != 'Y' AND ${contractors.fax} != 'F' AND length(${contractors.fax}) > 6)`),
     ]);
     res.json({
       total: parseInt(total[0].count),
