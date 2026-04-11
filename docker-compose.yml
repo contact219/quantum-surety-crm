@@ -10,6 +10,8 @@ services:
       - PORT=4000
     ports:
       - "4001:4000"
+    env_file:
+      - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
   crm-frontend:
