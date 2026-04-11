@@ -8,6 +8,8 @@ import { notariesRouter } from './routes/notaries.js';
 import { unsubscribeRouter } from './routes/unsubscribe.js';
 import { pipelineRouter } from './routes/pipeline.js';
 import { dripRouter } from './routes/drip.js';
+import { authRouter } from './routes/auth.js';
+import { trackingRouter } from './routes/tracking.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { notaryCampaignsRouter } from './routes/notary-campaigns.js';
 
@@ -25,4 +27,6 @@ app.use('/api/unsubscribe', unsubscribeRouter);
 app.use('/api/pipeline', pipelineRouter);
 app.use('/api/drip', dripRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/tracking', trackingRouter);
 app.listen(process.env.PORT || 4000, () => console.log('CRM backend running'));
