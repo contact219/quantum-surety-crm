@@ -262,12 +262,12 @@ export default function Notaries() {
       <div style={{flex:1,overflowY:'auto'}}>
         <table className="w-full text-sm" style={{tableLayout:'fixed'}}>
           <colgroup>
-            <col style={{width:'14%'}}/><col style={{width:'14%'}}/><col style={{width:'12%'}}/>
-            <col style={{width:'12%'}}/><col style={{width:'10%'}}/><col style={{width:'38%'}}/>
+            <col style={{width:'12%'}}/><col style={{width:'12%'}}/><col style={{width:'10%'}}/>
+            <col style={{width:'18%'}}/><col style={{width:'10%'}}/><col style={{width:'8%'}}/><col style={{width:'30%'}}/>
           </colgroup>
           <thead style={{position:'sticky',top:0,background:'var(--dark)',zIndex:1}}>
             <tr className="border-b" style={{borderColor:'var(--border)'}}>
-              {['First Name','Last Name','City','Expires','Status','Surety Company'].map(h=>(
+              {['First Name','Last Name','City','Email','Expires','Status','Surety Company'].map(h=>(
                 <th key={h} className="text-left px-3 py-3 text-xs font-mono tracking-wider" style={{color:'var(--text-dim)'}}>{h.toUpperCase()}</th>
               ))}
             </tr>
@@ -281,6 +281,7 @@ export default function Notaries() {
                   <td className="px-3 py-2.5 text-white truncate">{row.first_name||'—'}</td>
                   <td className="px-3 py-2.5 text-white truncate">{row.last_name||'—'}</td>
                   <td className="px-3 py-2.5 truncate" style={{color:'var(--text-dim)'}}>{row.city||'—'}</td>
+                  <td className="px-3 py-2.5 text-xs truncate" style={{color:row.email?'#4C9AC9':'var(--text-dim)'}}>{row.email||'—'}</td>
                   <td className="px-3 py-2.5 text-xs font-mono" style={{color}}>{formatDate(row.expire_date)}</td>
                   <td className="px-3 py-2.5">
                     {dl!==null&&(
