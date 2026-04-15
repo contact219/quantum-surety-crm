@@ -5,6 +5,12 @@ Usage: python deploy_to_server.py
 import paramiko
 import sys
 
+# Force UTF-8 output so Docker build unicode chars don't crash on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 SERVER = "192.168.4.122"
 USER = "tsparks"
 PASSWORD = "zadoL4cu!"

@@ -1,5 +1,5 @@
 import React,{useEffect,useState,useCallback} from 'react';
-import {Search,Mail,Phone,Fax,X,Send,ChevronLeft,ChevronRight,Building2,MapPin,Tag,Filter} from 'lucide-react';
+import {Search,Mail,Phone,X,Send,ChevronLeft,ChevronRight,Building2,MapPin,Tag,Filter} from 'lucide-react';
 
 const CERT_COLORS = {
   'HUB': '#C9A84C',
