@@ -817,7 +817,7 @@ export default function Notaries() {
                         <td className="px-4 py-2.5 truncate" style={{color:'#4C9AC9',maxWidth:'140px'}}>{h.email}</td>
                         <td className="px-4 py-2.5 truncate" style={{color:'var(--text-dim)',maxWidth:'130px'}}>{h.campaign_name||'—'}</td>
                         <td className="px-4 py-2.5 font-mono whitespace-nowrap" style={{color:'var(--text-dim)'}}>
-                          {h.sent_at?new Date(h.sent_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'—'}
+                          {h.sent_at?new Date(h.sent_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}):'—'}
                         </td>
                         <td className="px-4 py-2.5">
                           <span className="px-1.5 py-0.5 rounded font-mono"
