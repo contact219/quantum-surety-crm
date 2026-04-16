@@ -36,7 +36,7 @@ notariesRouter.get('/companies', async (req, res) => {
 
 notariesRouter.get('/', async (req, res) => {
   try {
-    const { page=1, limit=50, search='', city='', surety='', expiring='', has_email='' } = req.query;
+    const { page=1, limit=50, search='', city='', surety='', expiring='', has_email='', date_from='', date_to='' } = req.query;
     const offset = (parseInt(page)-1) * parseInt(limit);
     const lim = parseInt(limit);
 
@@ -52,9 +52,12 @@ notariesRouter.get('/', async (req, res) => {
     const cityCond   = city   ? sql`AND city ILIKE ${cityPct}` : sql``;
     const suretyCond = surety ? sql`AND surety_company ILIKE ${suretyPct}` : sql``;
     const emailCond  = has_email === 'true' ? sql`AND email != '' AND email IS NOT NULL` : sql``;
-    const expCond    = expiring === '90'      ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '90 days' AND expire_date >= CURRENT_DATE`
+    const expCond    = expiring === '30'      ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '30 days' AND expire_date >= CURRENT_DATE`
+                     : expiring === '60'      ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '60 days' AND expire_date >= CURRENT_DATE`
+                     : expiring === '90'      ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '90 days' AND expire_date >= CURRENT_DATE`
                      : expiring === '180'     ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '180 days' AND expire_date >= CURRENT_DATE`
                      : expiring === 'expired' ? sql`AND expire_date < CURRENT_DATE`
+                     : (date_from || date_to) ? sql`${date_from ? sql`AND expire_date >= ${date_from}::date` : sql``} ${date_to ? sql`AND expire_date <= ${date_to}::date` : sql``}`
                      : sql``;
 
     [rows, cnt] = await Promise.all([

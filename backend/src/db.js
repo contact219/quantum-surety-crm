@@ -39,6 +39,20 @@ export async function initDb() {
       contractor_id INTEGER REFERENCES contractors(id),
       email TEXT, status TEXT DEFAULT 'pending', sent_at TIMESTAMP, error TEXT
     );
+    CREATE TABLE IF NOT EXISTS notary_campaign_sends (
+      id SERIAL PRIMARY KEY,
+      notary_id INTEGER,
+      email TEXT,
+      campaign_name TEXT,
+      subject TEXT,
+      status TEXT DEFAULT 'sent',
+      error TEXT,
+      is_auto BOOLEAN DEFAULT false,
+      drip_id INTEGER,
+      sent_at TIMESTAMP DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS notary_campaign_sends_notary_id ON notary_campaign_sends(notary_id);
+    CREATE INDEX IF NOT EXISTS notary_campaign_sends_email ON notary_campaign_sends(email);
   `);
   console.log('CRM tables ready');
 }
