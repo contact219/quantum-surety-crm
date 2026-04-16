@@ -62,18 +62,19 @@ dripRouter.post('/run', async (req, res) => {
         const cityPct = filters.city ? `%${filters.city}%` : null;
         const suretyCond = suretyPct ? sql`AND surety_company ILIKE ${suretyPct}` : sql``;
         const cityCond = cityPct ? sql`AND city ILIKE ${cityPct}` : sql``;
-        const expCond = filters.expiring === '90' ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '90 days' AND expire_date >= CURRENT_DATE`
+        const expCond = filters.expiring === '30'  ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '30 days'  AND expire_date >= CURRENT_DATE`
+                      : filters.expiring === '60'  ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '60 days'  AND expire_date >= CURRENT_DATE`
+                      : filters.expiring === '90'  ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '90 days'  AND expire_date >= CURRENT_DATE`
                       : filters.expiring === '180' ? sql`AND expire_date <= CURRENT_DATE + INTERVAL '180 days' AND expire_date >= CURRENT_DATE`
                       : filters.expiring === 'expired' ? sql`AND expire_date < CURRENT_DATE`
                       : sql``;
         const result = await db.execute(sql`
-          SELECT first_name, last_name, email, expire_date, surety_company FROM notaries
+          SELECT id, first_name, last_name, email, expire_date, surety_company FROM notaries
           WHERE email != '' AND email IS NOT NULL
           AND email NOT IN (SELECT email FROM unsubscribes)
           AND email NOT IN (
-            SELECT contact_email FROM email_events
-            WHERE event_type = 'email.sent'
-            AND metadata->>'drip_id' = ${String(schedule.id)}
+            SELECT email FROM notary_campaign_sends
+            WHERE status = 'sent'
           )
           ${suretyCond} ${cityCond} ${expCond}
           ORDER BY expire_date ASC LIMIT ${limit}
@@ -118,10 +119,18 @@ dripRouter.post('/run', async (req, res) => {
             html,
             headers: { 'List-Unsubscribe': `<${unsubUrl}>` },
           });
+          const emailId = r.data?.id || '';
           await db.execute(sql`
             INSERT INTO email_events (email_id, contact_email, event_type, metadata)
-            VALUES (${r.data?.id||''}, ${c.email}, 'email.sent', ${JSON.stringify({drip_id:schedule.id})}::jsonb)
+            VALUES (${emailId}, ${c.email}, 'email.sent', ${JSON.stringify({drip_id:schedule.id})}::jsonb)
           `);
+          // Also record in notary_campaign_sends so UI history + SENT badges work
+          if (schedule.contact_type === 'notary') {
+            await db.execute(sql`
+              INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status, is_auto, drip_id)
+              VALUES (${c.id||null}, ${c.email}, ${schedule.name}, ${subj}, 'sent', true, ${schedule.id})
+            `);
+          }
           sent++;
           await new Promise(resolve => setTimeout(resolve, 300));
         } catch(e) { console.error('Drip send error:', e.message); }
