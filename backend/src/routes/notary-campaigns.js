@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import { Resend } from 'resend';
+import { sendEmail } from '../mailer.js';
 import { db } from '../db.js';
 import { sql } from 'drizzle-orm';
 
 export const notaryCampaignsRouter = Router();
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 function buildConditions(filters = {}) {
   const suretyPct = filters.surety ? `%${filters.surety}%` : null;
@@ -85,9 +84,9 @@ notaryCampaignsRouter.post('/send', async (req, res) => {
       const subj = interpolate(subject, c, expDate);
 
       try {
-        await resend.emails.send({
+        await sendEmail({
           from: `${from_name || 'Quantum Surety'} <${from_email || 'info@quantumsurety.bond'}>`,
-          to: [c.email], subject: subj, html,
+          to: c.email, subject: subj, html,
         });
         await db.execute(sql`
           INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status)
@@ -139,9 +138,9 @@ notaryCampaignsRouter.post('/send-selected', async (req, res) => {
       const subj = interpolate(subject, c, expDate);
 
       try {
-        await resend.emails.send({
+        await sendEmail({
           from: `${from_name || 'Quantum Surety'} <${from_email || 'info@quantumsurety.bond'}>`,
-          to: [c.email], subject: subj, html,
+          to: c.email, subject: subj, html,
         });
         await db.execute(sql`
           INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status)

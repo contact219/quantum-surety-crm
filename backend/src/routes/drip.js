@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import { Resend } from 'resend';
+import { sendEmail } from '../mailer.js';
 import { db } from '../db.js';
 import { sql } from 'drizzle-orm';
 
 export const dripRouter = Router();
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 dripRouter.get('/', async (req, res) => {
   try {
@@ -112,14 +111,14 @@ dripRouter.post('/run', async (req, res) => {
           .replace(/{{expire_date}}/g, expDate);
 
         try {
-          const r = await resend.emails.send({
+          const r = await sendEmail({
             from: `${schedule.from_name} <${schedule.from_email}>`,
-            to: [c.email],
+            to: c.email,
             subject: subj,
             html,
             headers: { 'List-Unsubscribe': `<${unsubUrl}>` },
           });
-          const emailId = r.data?.id || '';
+          const emailId = r.id || '';
           await db.execute(sql`
             INSERT INTO email_events (email_id, contact_email, event_type, metadata)
             VALUES (${emailId}, ${c.email}, 'email.sent', ${JSON.stringify({drip_id:schedule.id})}::jsonb)
@@ -171,9 +170,9 @@ dripRouter.post('/alert', async (req, res) => {
       </tr>
     `).join('');
 
-    await resend.emails.send({
+    await sendEmail({
       from: 'Quantum Surety CRM <info@quantumsurety.bond>',
-      to: [to_email],
+      to: to_email,
       subject: `🔔 ${notaries.length} Texas Notaries Expiring in 30 Days — ${new Date().toLocaleDateString()}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:24px">
