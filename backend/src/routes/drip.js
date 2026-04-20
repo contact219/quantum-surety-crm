@@ -73,7 +73,7 @@ dripRouter.post('/run', async (req, res) => {
           AND email NOT IN (SELECT email FROM unsubscribes)
           AND email NOT IN (
             SELECT email FROM notary_campaign_sends
-            WHERE status = 'sent'
+            WHERE status IN ('sent', 'suppressed')
           )
           ${suretyCond} ${cityCond} ${expCond}
           ORDER BY expire_date ASC LIMIT ${limit}
