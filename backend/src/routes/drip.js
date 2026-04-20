@@ -133,11 +133,24 @@ dripRouter.post('/run', async (req, res) => {
           sent++;
           await new Promise(resolve => setTimeout(resolve, 300));
         } catch(e) {
-          if (e.status === 429 || /too many requests/i.test(e.message)) {
-            console.error('Drip rate limited by Mailgun — stopping this run, will resume next scheduled run.');
+          const status = e.status || 0;
+          const msg = e.message || '';
+          if (status === 429 || /too many requests/i.test(msg)) {
+            console.error('Drip rate limited (429) — stopping this run.');
             break;
           }
-          console.error('Drip send error:', e.message);
+          if (status === 420) {
+            // Mailgun suppression/bounce — mark as sent so we stop retrying this address
+            console.error(`Drip skip (420 suppressed): ${c.email}`);
+            if (schedule.contact_type === 'notary') {
+              await db.execute(sql`
+                INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status, error, is_auto, drip_id)
+                VALUES (${c.id||null}, ${c.email}, ${schedule.name}, ${subj}, 'suppressed', 'Mailgun suppression list', true, ${schedule.id})
+              `).catch(() => {});
+            }
+            continue;
+          }
+          console.error('Drip send error:', status, msg);
         }
       }
 
