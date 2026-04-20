@@ -132,7 +132,13 @@ dripRouter.post('/run', async (req, res) => {
           }
           sent++;
           await new Promise(resolve => setTimeout(resolve, 300));
-        } catch(e) { console.error('Drip send error:', e.message); }
+        } catch(e) {
+          if (e.status === 429 || /too many requests/i.test(e.message)) {
+            console.error('Drip rate limited by Mailgun — stopping this run, will resume next scheduled run.');
+            break;
+          }
+          console.error('Drip send error:', e.message);
+        }
       }
 
       await db.execute(sql`
