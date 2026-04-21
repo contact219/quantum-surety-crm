@@ -140,8 +140,14 @@ dripRouter.post('/run', async (req, res) => {
             break;
           }
           if (status === 420) {
-            // Mailgun suppression/bounce — mark as sent so we stop retrying this address
-            console.error(`Drip skip (420 suppressed): ${c.email} | details: ${e.details || JSON.stringify(e.response?.data || '')}`);
+            const detail = e.details || JSON.stringify(e.response?.data || '');
+            if (/recipient limit exceeded/i.test(detail)) {
+              // Domain hourly sending cap hit — stop this run, addresses are fine
+              console.error(`Drip domain limit reached (420): ${detail}`);
+              break;
+            }
+            // Individual address suppressed by Mailgun
+            console.error(`Drip skip (420 suppressed): ${c.email}`);
             if (schedule.contact_type === 'notary') {
               await db.execute(sql`
                 INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status, error, is_auto, drip_id)
