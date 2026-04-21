@@ -141,13 +141,14 @@ dripRouter.post('/run', async (req, res) => {
           }
           if (status === 420) {
             // Mailgun suppression/bounce — mark as sent so we stop retrying this address
-            console.error(`Drip skip (420 suppressed): ${c.email}`);
+            console.error(`Drip skip (420 suppressed): ${c.email} | details: ${e.details || JSON.stringify(e.response?.data || '')}`);
             if (schedule.contact_type === 'notary') {
               await db.execute(sql`
                 INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status, error, is_auto, drip_id)
                 VALUES (${c.id||null}, ${c.email}, ${schedule.name}, ${subj}, 'suppressed', 'Mailgun suppression list', true, ${schedule.id})
               `).catch(() => {});
             }
+            await new Promise(r => setTimeout(r, 200));
             continue;
           }
           console.error('Drip send error:', status, msg);
