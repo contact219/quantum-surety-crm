@@ -131,33 +131,15 @@ dripRouter.post('/run', async (req, res) => {
             `);
           }
           sent++;
-          await new Promise(resolve => setTimeout(resolve, 300));
+          await new Promise(resolve => setTimeout(resolve, 80));
         } catch(e) {
-          const status = e.status || 0;
           const msg = e.message || '';
-          if (status === 429 || /too many requests/i.test(msg)) {
-            console.error('Drip rate limited (429) — stopping this run.');
+          const code = e.Code || e.code || '';
+          if (/Throttling|throttl|rate.exceed|too many/i.test(msg + code)) {
+            console.error('Drip rate limited by SES — stopping this run.');
             break;
           }
-          if (status === 420) {
-            const detail = e.details || JSON.stringify(e.response?.data || '');
-            if (/recipient limit exceeded/i.test(detail)) {
-              // Domain hourly sending cap hit — stop this run, addresses are fine
-              console.error(`Drip domain limit reached (420): ${detail}`);
-              break;
-            }
-            // Individual address suppressed by Mailgun
-            console.error(`Drip skip (420 suppressed): ${c.email}`);
-            if (schedule.contact_type === 'notary') {
-              await db.execute(sql`
-                INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status, error, is_auto, drip_id)
-                VALUES (${c.id||null}, ${c.email}, ${schedule.name}, ${subj}, 'suppressed', 'Mailgun suppression list', true, ${schedule.id})
-              `).catch(() => {});
-            }
-            await new Promise(r => setTimeout(r, 200));
-            continue;
-          }
-          console.error('Drip send error:', status, msg);
+          console.error('Drip send error:', msg);
         }
       }
 

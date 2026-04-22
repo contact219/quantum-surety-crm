@@ -1,30 +1,30 @@
-import Mailgun from 'mailgun.js';
-import FormData from 'form-data';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import nodemailer from 'nodemailer';
 
-const mailgun = new Mailgun(FormData);
-
-export const mg = mailgun.client({
-  username: 'api',
-  key: process.env.MAILGUN_API_KEY,
+const client = new SESClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
 
-export const DOMAIN = process.env.MAILGUN_DOMAIN || 'quantumsurety.bond';
+const transporter = nodemailer.createTransport({
+  SES: { ses: client, aws: { SendEmailCommand } },
+});
 
 /**
- * Send a single email via Mailgun.
+ * Send a single email via AWS SES.
  * @param {object} opts  - from, to (string or array), subject, html, headers (optional)
- * @returns Mailgun message response
+ * @returns {{ id: string }}
  */
 export async function sendEmail({ from, to, subject, html, headers = {} }) {
-  const msg = {
+  const result = await transporter.sendMail({
     from,
-    to: Array.isArray(to) ? to : [to],
+    to: Array.isArray(to) ? to.join(', ') : to,
     subject,
     html,
-  };
-  // Mailgun custom headers use the "h:" prefix
-  for (const [key, val] of Object.entries(headers)) {
-    msg[`h:${key}`] = val;
-  }
-  return mg.messages.create(DOMAIN, msg);
+    headers,
+  });
+  return { id: result.messageId };
 }
