@@ -112,7 +112,7 @@ dripRouter.post('/run', async (req, res) => {
 
         try {
           const r = await sendEmail({
-            from: `${schedule.from_name} <${schedule.from_email}>`,
+            from: `"${schedule.from_name.replace(/"/g,'')}" <${schedule.from_email}>`,
             to: c.email,
             subject: subj,
             html,

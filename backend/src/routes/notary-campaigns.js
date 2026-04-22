@@ -85,7 +85,7 @@ notaryCampaignsRouter.post('/send', async (req, res) => {
 
       try {
         await sendEmail({
-          from: `${from_name || 'Quantum Surety'} <${from_email || 'info@quantumsurety.bond'}>`,
+          from: `"${(from_name || 'Quantum Surety').replace(/"/g,'')}" <${from_email || 'info@quantumsurety.bond'}>`,
           to: c.email, subject: subj, html,
         });
         await db.execute(sql`
@@ -139,7 +139,7 @@ notaryCampaignsRouter.post('/send-selected', async (req, res) => {
 
       try {
         await sendEmail({
-          from: `${from_name || 'Quantum Surety'} <${from_email || 'info@quantumsurety.bond'}>`,
+          from: `"${(from_name || 'Quantum Surety').replace(/"/g,'')}" <${from_email || 'info@quantumsurety.bond'}>`,
           to: c.email, subject: subj, html,
         });
         await db.execute(sql`

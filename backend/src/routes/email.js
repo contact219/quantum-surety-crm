@@ -9,7 +9,7 @@ emailRouter.post('/send', async (req, res) => {
   if (!to_email||!subject||!body) return res.status(400).json({error:'to_email, subject, body required'});
   try {
     const r = await sendEmail({
-      from: `${from_name||'Quantum Surety'} <${from_email||'info@quantumsurety.bond'}>`,
+      from: `"${(from_name||'Quantum Surety').replace(/"/g,'')}" <${from_email||'info@quantumsurety.bond'}>`,
       to: to_email, subject, html: body,
     });
     res.json({ok:true, id:r.id});
