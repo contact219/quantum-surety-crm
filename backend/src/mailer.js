@@ -1,4 +1,4 @@
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { SESClient, SendRawEmailCommand } from '@aws-sdk/client-ses';
 import nodemailer from 'nodemailer';
 
 const client = new SESClient({
@@ -9,9 +9,8 @@ const client = new SESClient({
   },
 });
 
-const transporter = nodemailer.createTransport({
-  SES: { ses: client, aws: { SendEmailCommand } },
-});
+// Use nodemailer stream transport only to build raw MIME messages
+const builder = nodemailer.createTransport({ streamTransport: true, newline: 'unix', buffer: true });
 
 /**
  * Send a single email via AWS SES.
@@ -19,12 +18,15 @@ const transporter = nodemailer.createTransport({
  * @returns {{ id: string }}
  */
 export async function sendEmail({ from, to, subject, html, headers = {} }) {
-  const result = await transporter.sendMail({
-    from,
-    to: Array.isArray(to) ? to.join(', ') : to,
-    subject,
-    html,
-    headers,
+  const toArr = Array.isArray(to) ? to : [to];
+
+  // Build raw MIME via nodemailer (supports custom headers)
+  const { message } = await builder.sendMail({ from, to: toArr.join(', '), subject, html, headers });
+
+  const cmd = new SendRawEmailCommand({
+    RawMessage: { Data: message },
+    Destinations: toArr,
   });
-  return { id: result.messageId };
+  const result = await client.send(cmd);
+  return { id: result.MessageId };
 }
