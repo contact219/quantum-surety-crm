@@ -16,6 +16,41 @@ emailRouter.post('/send', async (req, res) => {
   } catch(err) { res.status(500).json({error:err.message}); }
 });
 
+// Send to specific contractor IDs (ad-hoc, no campaign record required)
+emailRouter.post('/send-selected', async (req, res) => {
+  const { ids, subject, body, from_name, from_email } = req.body;
+  if (!ids?.length) return res.status(400).json({ error: 'ids required' });
+  if (!subject || !body) return res.status(400).json({ error: 'subject and body required' });
+
+  const safeIds = ids.map(Number).filter(n => Number.isInteger(n) && n > 0);
+  if (!safeIds.length) return res.json({ ok: true, sent: 0, failed: 0, total: 0 });
+
+  const inClause = sql.join(safeIds.map(id => sql`${id}`), sql`, `);
+  const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  try {
+    const rows = await db.execute(sql`
+      SELECT id, company_name, email, website FROM contractors WHERE id IN (${inClause})
+    `);
+    let sent = 0, failed = 0;
+    for (const c of rows.rows) {
+      const to = emailRx.test(c.website || '') ? c.website : c.email;
+      if (!to) { failed++; continue; }
+      const html = body.replace(/{{company_name}}/g, c.company_name || '');
+      const subj = subject.replace(/{{company_name}}/g, c.company_name || '');
+      try {
+        await sendEmail({
+          from: `"${(from_name || 'Quantum Surety').replace(/"/g, '')}" <${from_email || 'info@quantumsurety.bond'}>`,
+          to, subject: subj, html,
+        });
+        sent++;
+        await new Promise(r => setTimeout(r, 300));
+      } catch (e) { failed++; }
+    }
+    res.json({ ok: true, sent, failed, total: rows.rows.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 emailRouter.post('/campaign/:id/send', async (req, res) => {
   const { contact_ids } = req.body;
   const campaignId = parseInt(req.params.id);

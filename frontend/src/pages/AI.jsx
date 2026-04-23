@@ -146,6 +146,7 @@ export default function AI() {
   const [loading,setLoading]=useState(false);
   const [result,setResult]=useState(null);
   const [error,setError]=useState('');
+  const [saveStatus,setSaveStatus]=useState('');
 
   // Form states
   const [generateForm,setGenerateForm]=useState({brief:'',contact_type:'notary',tone:'professional but urgent'});
@@ -156,7 +157,7 @@ export default function AI() {
   const [enrichForm,setEnrichForm]=useState({company_name:'',city:'',state:'TX',certification_type:'HUB',naics_codes:''});
 
   const call = async(endpoint, body) => {
-    setLoading(true);setResult(null);setError('');
+    setLoading(true);setResult(null);setError('');setSaveStatus('');
     try {
       const r = await apiFetch(`/api/ai/${endpoint}`,{method:'POST',body:JSON.stringify(body)});
       const j = await r.json();
@@ -164,6 +165,24 @@ export default function AI() {
       else setResult(j);
     } catch(e){ setError(e.message); }
     setLoading(false);
+  };
+
+  const saveCampaign = async() => {
+    const html = result?.html || result?.response;
+    if(!result?.subject || !html) return;
+    setSaveStatus('saving');
+    try {
+      const r = await apiFetch('/api/campaigns',{method:'POST',body:JSON.stringify({
+        name: result.subject,
+        subject: result.subject,
+        body: html,
+        from_name: 'Quantum Surety',
+        from_email: 'info@quantumsurety.bond',
+      })});
+      const j = await r.json();
+      if(j.error) setSaveStatus('error');
+      else setSaveStatus('saved');
+    } catch(e){ setSaveStatus('error'); }
   };
 
   const feature = FEATURES.find(f=>f.id===active);
@@ -224,10 +243,18 @@ export default function AI() {
                   </select>
                 </div>
               </div>
-              <button onClick={()=>call('generate-campaign',generateForm)} disabled={loading||!generateForm.brief}
-                style={{padding:'12px 24px',borderRadius:10,background:'var(--gold)',color:'#0A0A0F',border:'none',cursor:'pointer',fontSize:14,fontWeight:700,alignSelf:'flex-start',opacity:loading||!generateForm.brief?0.5:1}}>
-                {loading?'Generating...':'✨ Generate Campaign'}
-              </button>
+              <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+                <button onClick={()=>call('generate-campaign',generateForm)} disabled={loading||!generateForm.brief}
+                  style={{padding:'12px 24px',borderRadius:10,background:'var(--gold)',color:'#0A0A0F',border:'none',cursor:'pointer',fontSize:14,fontWeight:700,opacity:loading||!generateForm.brief?0.5:1}}>
+                  {loading?'Generating...':'✨ Generate Campaign'}
+                </button>
+                {result?.subject&&(result?.html||result?.response)&&(
+                  <button onClick={saveCampaign} disabled={saveStatus==='saving'||saveStatus==='saved'}
+                    style={{padding:'12px 24px',borderRadius:10,border:'1px solid rgba(76,201,122,0.4)',background:'rgba(76,201,122,0.1)',color:'#4CC97A',cursor:'pointer',fontSize:14,fontWeight:600,opacity:saveStatus==='saving'?0.6:1}}>
+                    {saveStatus==='saved'?'✓ Saved to Campaigns':saveStatus==='saving'?'Saving...':saveStatus==='error'?'⚠ Save Failed':'💾 Save as Campaign'}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
