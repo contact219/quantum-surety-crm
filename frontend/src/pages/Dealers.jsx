@@ -356,7 +356,7 @@ export default function Dealers() {
                   <div>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
                       <label style={{fontSize:9,fontFamily:'monospace',letterSpacing:2,color:'var(--text-dim)'}}>EMAIL BODY</label>
-                      <div style={{display:'flex',gap:6',alignItems:'center',fontSize:10,color:'rgba(201,168,76,0.7)'}}>
+                      <div style={{display:'flex',gap:6,alignItems:'center',fontSize:10,color:'rgba(201,168,76,0.7)'}}>
                         <span>{'{{business_name}}'}</span>
                         <span>{'{{expire_date}}'}</span>
                         <button onClick={()=>setPreview(p=>!p)}
