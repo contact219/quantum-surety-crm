@@ -93,7 +93,9 @@ export default function Campaigns() {
   const [expandedStats,setExpandedStats]=useState(null);
   const [campaignSends,setCampaignSends]=useState({});
 
-  const load=()=>fetch('/api/campaigns').then(r=>r.json()).then(setCampaigns);
+  const safeJson = async(r) => { const t=await r.text(); try{return JSON.parse(t);}catch{throw new Error(`Server error (${r.status})`);} };
+
+  const load=()=>fetch('/api/campaigns').then(safeJson).then(setCampaigns).catch(()=>{});
   useEffect(()=>{load();},[]);
 
   // Live audience count
@@ -104,7 +106,7 @@ export default function Campaigns() {
     if(audience.state) p.set('state',audience.state);
     if(audience.cert_type) p.set('cert_type',audience.cert_type);
     if(audience.city) p.set('city',audience.city);
-    fetch(`/api/contacts?${p}`).then(r=>r.json()).then(j=>setAudienceCount(j.total));
+    fetch(`/api/contacts?${p}`).then(safeJson).then(j=>setAudienceCount(j?.total??0)).catch(()=>setAudienceCount(0));
   },[audience,showAudience]);
 
   const applyTemplate = (key) => {
@@ -138,10 +140,12 @@ export default function Campaigns() {
   };
 
   const loadSends = async(id) => {
-    const r = await fetch(`/api/campaigns/${id}/sends`);
-    const j = await r.json();
-    setCampaignSends(s=>({...s,[id]:j}));
-    setExpandedStats(expandedStats===id?null:id);
+    try {
+      const r = await fetch(`/api/campaigns/${id}/sends`);
+      const j = await safeJson(r);
+      setCampaignSends(s=>({...s,[id]:Array.isArray(j)?j:[]}));
+      setExpandedStats(expandedStats===id?null:id);
+    } catch(e) { console.error('loadSends',e.message); }
   };
 
   const sendCampaign = async(campaignId) => {
@@ -161,8 +165,7 @@ export default function Campaigns() {
       while(page <= pages) {
         p.set('page',page);
         const r = await fetch(`/api/contacts?${p}`);
-        if(!r.ok) throw new Error(`Contacts fetch failed (${r.status})`);
-        const j = await r.json();
+        const j = await safeJson(r);
         pages = j.pages || 1;
         (j.data||[]).forEach(c=>allIds.push(c.id));
         page++;
@@ -179,11 +182,7 @@ export default function Campaigns() {
           method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({contact_ids:batch})
         });
-        if(!r.ok) {
-          const txt = await r.text();
-          throw new Error(`Send error (${r.status}): ${txt.replace(/<[^>]+>/g,'').slice(0,120)}`);
-        }
-        const j = await r.json();
+        const j = await safeJson(r);
         if(j.error) throw new Error(j.error);
         totals.sent += j.sent||0; totals.failed += j.failed||0; totals.skipped += j.skipped||0;
         setSendProgress({...totals,total:allIds.length});
