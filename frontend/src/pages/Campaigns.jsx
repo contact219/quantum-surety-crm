@@ -87,6 +87,7 @@ export default function Campaigns() {
   const [sending,setSending]=useState(null);
   const [sendProgress,setSendProgress]=useState({sent:0,failed:0,skipped:0,total:0});
   const [sendResult,setSendResult]=useState(null);
+  const [sendError,setSendError]=useState('');
 
   // Stats
   const [expandedStats,setExpandedStats]=useState(null);
@@ -144,49 +145,57 @@ export default function Campaigns() {
   };
 
   const sendCampaign = async(campaignId) => {
-    setSending(campaignId);setSendResult(null);
+    setSending(campaignId);setSendResult(null);setSendError('');
     setSendProgress({sent:0,failed:0,skipped:0,total:audienceCount||0});
 
-    // Fetch all contact IDs matching audience
-    const allIds = [];
-    let page = 1;
-    const p = new URLSearchParams({limit:100,has_email:audience.has_email?'true':'',has_fax:audience.has_fax?'true':''});
-    if(audience.state) p.set('state',audience.state);
-    if(audience.cert_type) p.set('cert_type',audience.cert_type);
-    if(audience.city) p.set('city',audience.city);
+    try {
+      // Fetch all contact IDs matching audience
+      const allIds = [];
+      let page = 1;
+      const p = new URLSearchParams({limit:100,has_email:audience.has_email?'true':'',has_fax:audience.has_fax?'true':''});
+      if(audience.state) p.set('state',audience.state);
+      if(audience.cert_type) p.set('cert_type',audience.cert_type);
+      if(audience.city) p.set('city',audience.city);
 
-    let pages = 1;
-    while(page <= pages) {
-      p.set('page',page);
-      const r = await fetch(`/api/contacts?${p}`);
-      const j = await r.json();
-      pages = j.pages;
-      j.data.forEach(c=>allIds.push(c.id));
-      page++;
-      if(page > 50) break; // safety cap
+      let pages = 1;
+      while(page <= pages) {
+        p.set('page',page);
+        const r = await fetch(`/api/contacts?${p}`);
+        if(!r.ok) throw new Error(`Contacts fetch failed (${r.status})`);
+        const j = await r.json();
+        pages = j.pages || 1;
+        (j.data||[]).forEach(c=>allIds.push(c.id));
+        page++;
+        if(page > 50) break;
+      }
+
+      if(!allIds.length) { setSending(null); setSendError('No contacts matched the audience filters.'); return; }
+      setSendProgress(s=>({...s,total:allIds.length}));
+
+      let totals = {sent:0,failed:0,skipped:0};
+      for(let i=0;i<allIds.length;i+=50){
+        const batch = allIds.slice(i,i+50);
+        const r = await fetch(`/api/email/campaign/${campaignId}/send`,{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({contact_ids:batch})
+        });
+        if(!r.ok) {
+          const txt = await r.text();
+          throw new Error(`Send error (${r.status}): ${txt.replace(/<[^>]+>/g,'').slice(0,120)}`);
+        }
+        const j = await r.json();
+        if(j.error) throw new Error(j.error);
+        totals.sent += j.sent||0; totals.failed += j.failed||0; totals.skipped += j.skipped||0;
+        setSendProgress({...totals,total:allIds.length});
+      }
+
+      setSending(null);setShowAudience(null);
+      setSendResult({campaignId,...totals});
+      load();
+    } catch(err) {
+      setSending(null);
+      setSendError(err.message);
     }
-
-    setSendProgress(s=>({...s,total:allIds.length}));
-
-    // Send in batches of 50
-    for(let i=0;i<allIds.length;i+=50){
-      const batch = allIds.slice(i,i+50);
-      const r = await fetch(`/api/email/campaign/${campaignId}/send`,{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({contact_ids:batch})
-      });
-      const j = await r.json();
-      setSendProgress(s=>({
-        sent:s.sent+(j.sent||0),
-        failed:s.failed+(j.failed||0),
-        skipped:s.skipped+(j.skipped||0),
-        total:allIds.length,
-      }));
-    }
-
-    setSending(null);setShowAudience(null);
-    setSendResult({campaignId,...sendProgress});
-    load();
   };
 
   return (
@@ -359,6 +368,11 @@ export default function Campaigns() {
                   </div>
                 )}
 
+                {sendError&&showAudience===c.id&&(
+                  <div className="mb-3 px-3 py-2 rounded text-xs" style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#f87171'}}>
+                    {sendError}
+                  </div>
+                )}
                 <button
                   onClick={()=>sendCampaign(c.id)}
                   disabled={sending===c.id||!audienceCount}
