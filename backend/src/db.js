@@ -53,6 +53,40 @@ export async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS notary_campaign_sends_notary_id ON notary_campaign_sends(notary_id);
     CREATE INDEX IF NOT EXISTS notary_campaign_sends_email ON notary_campaign_sends(email);
+
+    CREATE TABLE IF NOT EXISTS auto_dealers (
+      id SERIAL PRIMARY KEY,
+      business_name TEXT NOT NULL,
+      dba_name TEXT,
+      license_number TEXT,
+      license_category TEXT,
+      license_type TEXT,
+      license_status TEXT DEFAULT 'Active',
+      license_expiration DATE,
+      address1 TEXT, address2 TEXT,
+      city TEXT, state TEXT DEFAULT 'TX', zip TEXT,
+      phone TEXT, fax TEXT, email TEXT, county TEXT,
+      created_at TIMESTAMP DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS auto_dealers_email ON auto_dealers(email);
+    CREATE INDEX IF NOT EXISTS auto_dealers_city ON auto_dealers(city);
+    CREATE INDEX IF NOT EXISTS auto_dealers_county ON auto_dealers(county);
+    CREATE INDEX IF NOT EXISTS auto_dealers_expiration ON auto_dealers(license_expiration);
+
+    CREATE TABLE IF NOT EXISTS dealer_campaign_sends (
+      id SERIAL PRIMARY KEY,
+      dealer_id INTEGER,
+      email TEXT,
+      campaign_name TEXT,
+      subject TEXT,
+      status TEXT DEFAULT 'sent',
+      error TEXT,
+      is_auto BOOLEAN DEFAULT false,
+      drip_id INTEGER,
+      sent_at TIMESTAMP DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS dealer_campaign_sends_dealer_id ON dealer_campaign_sends(dealer_id);
+    CREATE INDEX IF NOT EXISTS dealer_campaign_sends_email ON dealer_campaign_sends(email);
   `);
   console.log('CRM tables ready');
 }

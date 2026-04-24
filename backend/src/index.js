@@ -13,6 +13,8 @@ import { authRouter } from './routes/auth.js';
 import { trackingRouter } from './routes/tracking.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { notaryCampaignsRouter } from './routes/notary-campaigns.js';
+import { dealersRouter } from './routes/dealers.js';
+import { dealerCampaignsRouter } from './routes/dealer-campaigns.js';
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -24,6 +26,8 @@ app.use('/api/import', importRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/notaries', notariesRouter);
 app.use('/api/notary-campaigns', notaryCampaignsRouter);
+app.use('/api/dealers', dealersRouter);
+app.use('/api/dealer-campaigns', dealerCampaignsRouter);
 app.use('/api/unsubscribe', unsubscribeRouter);
 app.use('/api/pipeline', pipelineRouter);
 app.use('/api/drip', dripRouter);
