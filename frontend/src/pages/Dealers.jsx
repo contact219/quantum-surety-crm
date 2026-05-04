@@ -28,7 +28,7 @@ const DEALER_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;m
   </div>
   <a href="https://quantumsurety.bond/quote" style="background:#C9A84C;color:#000;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-family:Arial,sans-serif;font-size:15px">Get Your Bond Quote →</a>
   <hr style="border:none;border-top:1px solid #eee;margin:32px 0"/>
-  <p style="color:#999;font-size:11px;margin:0;font-family:Arial,sans-serif">Quantum Surety LLC · Texas Licensed Surety Agency · <a href="https://quantumsurety.bond" style="color:#C9A84C">quantumsurety.bond</a> · To unsubscribe reply STOP</p>
+  <p style="color:#999;font-size:11px;margin:0;font-family:Arial,sans-serif">Quantum Surety LLC · Texas Licensed Surety Agency · <a href="https://quantumsurety.bond" style="color:#C9A84C">quantumsurety.bond</a> · <a href="{{unsubscribe_url}}" style="color:#999">Unsubscribe</a></p>
 </div>`;
 
 const BLANK_FORM = {
@@ -39,7 +39,7 @@ const BLANK_FORM = {
   from_email:'info@quantumsurety.bond',
 };
 
-const BLANK_FILTERS = { search:'', city:'', county:'', license_type:'', expiring:'', has_email:'' };
+const BLANK_FILTERS = { search:'', city:'', county:'', license_type:'', expiring:'60', has_email:'' };
 
 function expiryColor(dateStr) {
   if (!dateStr) return 'var(--text-dim)';
