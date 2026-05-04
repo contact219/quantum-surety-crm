@@ -5,6 +5,9 @@ import { sql } from 'drizzle-orm';
 
 export const notaryCampaignsRouter = Router();
 
+const APP_URL = process.env.APP_URL || 'https://quantumsurety.bond';
+const COOLDOWN_DAYS = 60;
+
 function buildConditions(filters = {}) {
   const suretyPct = filters.surety ? `%${filters.surety}%` : null;
   const cityPct   = filters.city   ? `%${filters.city}%`   : null;
@@ -25,20 +28,27 @@ function buildConditions(filters = {}) {
     expCond = sql``;
   }
 
-  return { suretyCond, cityCond, expCond };
+  const cooldownCond = sql`AND id NOT IN (
+    SELECT notary_id FROM notary_campaign_sends
+    WHERE notary_id IS NOT NULL AND status = 'sent'
+    AND sent_at > NOW() - INTERVAL '${sql.raw(String(COOLDOWN_DAYS))} days'
+  )`;
+
+  return { suretyCond, cityCond, expCond, cooldownCond };
 }
 
-function interpolate(template, c, expDate) {
+function interpolate(template, c, expDate, unsubscribeUrl) {
   return template
-    .replace(/{{first_name}}/g,    c.first_name || '')
-    .replace(/{{name}}/g,          `${c.first_name || ''} ${c.last_name || ''}`.trim())
-    .replace(/{{expire_date}}/g,   expDate)
-    .replace(/{{surety_company}}/g, c.surety_company || '');
+    .replace(/{{first_name}}/g,       c.first_name || '')
+    .replace(/{{name}}/g,             `${c.first_name || ''} ${c.last_name || ''}`.trim())
+    .replace(/{{expire_date}}/g,      expDate)
+    .replace(/{{surety_company}}/g,   c.surety_company || '')
+    .replace(/{{unsubscribe_url}}/g,  unsubscribeUrl || '');
 }
 
 // Count contacts matching filters (optionally skip already sent)
 notaryCampaignsRouter.post('/count', async (req, res) => {
-  const { suretyCond, cityCond, expCond } = buildConditions(req.body?.filters);
+  const { suretyCond, cityCond, expCond, cooldownCond } = buildConditions(req.body?.filters);
   const skipSentCond = req.body?.skip_sent
     ? sql`AND id NOT IN (SELECT notary_id FROM notary_campaign_sends WHERE notary_id IS NOT NULL AND status = 'sent')`
     : sql``;
@@ -47,7 +57,7 @@ notaryCampaignsRouter.post('/count', async (req, res) => {
       SELECT COUNT(*) as count FROM notaries
       WHERE email != '' AND email IS NOT NULL
       AND email NOT IN (SELECT email FROM unsubscribes)
-      ${suretyCond} ${cityCond} ${expCond} ${skipSentCond}
+      ${suretyCond} ${cityCond} ${expCond} ${skipSentCond} ${cooldownCond}
     `);
     res.json({ count: parseInt(result.rows[0].count) });
   } catch(err) { res.status(500).json({ error: err.message }); }
@@ -58,7 +68,7 @@ notaryCampaignsRouter.post('/send', async (req, res) => {
   const { subject, body, from_name, from_email, filters, campaign_name, skip_sent } = req.body;
   if (!subject || !body) return res.status(400).json({ error: 'subject and body required' });
 
-  const { suretyCond, cityCond, expCond } = buildConditions(filters);
+  const { suretyCond, cityCond, expCond, cooldownCond } = buildConditions(filters);
   const skipSentCond = skip_sent
     ? sql`AND id NOT IN (SELECT notary_id FROM notary_campaign_sends WHERE notary_id IS NOT NULL AND status = 'sent')`
     : sql``;
@@ -69,24 +79,30 @@ notaryCampaignsRouter.post('/send', async (req, res) => {
       FROM notaries
       WHERE email != '' AND email IS NOT NULL
       AND email NOT IN (SELECT email FROM unsubscribes)
-      ${suretyCond} ${cityCond} ${expCond} ${skipSentCond}
+      ${suretyCond} ${cityCond} ${expCond} ${skipSentCond} ${cooldownCond}
       LIMIT 5000
     `);
 
     let sent = 0, failed = 0;
     const name = campaign_name || subject;
+    const senderEmail = from_email || 'info@quantumsurety.bond';
 
     for (const c of rows.rows) {
       const expDate = c.expire_date
         ? new Date(c.expire_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
         : '';
-      const html = interpolate(body, c, expDate);
-      const subj = interpolate(subject, c, expDate);
+      const unsubscribeUrl = `${APP_URL}/api/unsubscribe?email=${encodeURIComponent(c.email)}`;
+      const html = interpolate(body, c, expDate, unsubscribeUrl);
+      const subj = interpolate(subject, c, expDate, unsubscribeUrl);
 
       try {
         await sendEmail({
-          from: `"${(from_name || 'Quantum Surety').replace(/"/g,'')}" <${from_email || 'info@quantumsurety.bond'}>`,
+          from: `"${(from_name || 'Quantum Surety').replace(/"/g,'')}" <${senderEmail}>`,
           to: c.email, subject: subj, html,
+          headers: {
+            'List-Unsubscribe': `<${unsubscribeUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          },
         });
         await db.execute(sql`
           INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status)
@@ -116,8 +132,8 @@ notaryCampaignsRouter.post('/send-selected', async (req, res) => {
   const safeIds = ids.map(Number).filter(n => Number.isInteger(n) && n > 0);
   if (!safeIds.length) return res.json({ ok: true, sent: 0, failed: 0, total: 0 });
 
-  // Build safe IN clause from validated integers
   const inClause = sql.join(safeIds.map(id => sql`${id}`), sql`, `);
+  const senderEmail = from_email || 'info@quantumsurety.bond';
 
   try {
     const rows = await db.execute(sql`
@@ -134,13 +150,18 @@ notaryCampaignsRouter.post('/send-selected', async (req, res) => {
       const expDate = c.expire_date
         ? new Date(c.expire_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
         : '';
-      const html = interpolate(body, c, expDate);
-      const subj = interpolate(subject, c, expDate);
+      const unsubscribeUrl = `${APP_URL}/api/unsubscribe?email=${encodeURIComponent(c.email)}`;
+      const html = interpolate(body, c, expDate, unsubscribeUrl);
+      const subj = interpolate(subject, c, expDate, unsubscribeUrl);
 
       try {
         await sendEmail({
-          from: `"${(from_name || 'Quantum Surety').replace(/"/g,'')}" <${from_email || 'info@quantumsurety.bond'}>`,
+          from: `"${(from_name || 'Quantum Surety').replace(/"/g,'')}" <${senderEmail}>`,
           to: c.email, subject: subj, html,
+          headers: {
+            'List-Unsubscribe': `<${unsubscribeUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          },
         });
         await db.execute(sql`
           INSERT INTO notary_campaign_sends (notary_id, email, campaign_name, subject, status)
@@ -215,7 +236,6 @@ notaryCampaignsRouter.post('/auto', async (req, res) => {
   const filters = { expiring: days };
 
   try {
-    // Pause any existing auto campaigns before creating a new one
     await db.execute(sql`
       UPDATE drip_schedules SET status = 'paused'
       WHERE contact_type = 'notary' AND name LIKE 'AUTO:%'
