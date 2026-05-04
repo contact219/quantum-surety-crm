@@ -27,7 +27,7 @@ const DEALER_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;m
     <p style="margin:4px 0;color:#333;font-size:14px">✓ Fast online application — 10 minutes or less</p>
   </div>
   <a href="https://quantumsurety.bond/get-bond?type=dealer" style="background:#C9A84C;color:#000;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-family:Arial,sans-serif;font-size:15px">Get Your Bond Quote →</a>
-  <p style="margin:16px 0 0;color:#555;font-size:14px;font-family:Arial,sans-serif">Prefer to talk? Call us: <a href="tel:+18889978889" style="color:#C9A84C;font-weight:bold">(888) 997-8889</a></p>
+  <p style="margin:16px 0 0;color:#555;font-size:14px;font-family:Arial,sans-serif">Prefer to talk? Call us: <a href="tel:+19723799216" style="color:#C9A84C;font-weight:bold">972-379-9216</a></p>
   <hr style="border:none;border-top:1px solid #eee;margin:32px 0"/>
   <p style="color:#999;font-size:11px;margin:0;font-family:Arial,sans-serif">Quantum Surety LLC · Texas Licensed Surety Agency · <a href="https://quantumsurety.bond" style="color:#C9A84C">quantumsurety.bond</a> · <a href="{{unsubscribe_url}}" style="color:#999">Unsubscribe</a></p>
 </div>`;
