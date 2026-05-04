@@ -35,7 +35,7 @@ const NOTARY_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;m
   </div>
   <a href="https://quantumsurety.bond/quote" style="background:#C9A84C;color:#000;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-family:Arial,sans-serif;font-size:15px">Renew My Bond Now →</a>
   <hr style="border:none;border-top:1px solid #eee;margin:32px 0"/>
-  <p style="color:#999;font-size:11px;margin:0;font-family:Arial,sans-serif">Quantum Surety LLC · Texas Licensed Surety Agency · <a href="https://quantumsurety.bond" style="color:#C9A84C">quantumsurety.bond</a> · To unsubscribe reply STOP</p>
+  <p style="color:#999;font-size:11px;margin:0;font-family:Arial,sans-serif">Quantum Surety LLC · Texas Licensed Surety Agency · <a href="https://quantumsurety.bond" style="color:#C9A84C">quantumsurety.bond</a> · <a href="{{unsubscribe_url}}" style="color:#999">Unsubscribe</a></p>
 </div>`;
 
 const BLANK_FORM = {
@@ -100,7 +100,7 @@ export default function Notaries() {
   const [search,setSearch]=useState('');
   const [city,setCity]=useState('');
   const [surety,setSurety]=useState('');
-  const [expiring,setExpiring]=useState('');
+  const [expiring,setExpiring]=useState('60');
   const [hasEmail,setHasEmail]=useState(false);
   const [dateFrom,setDateFrom]=useState('');
   const [dateTo,setDateTo]=useState('');
