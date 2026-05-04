@@ -1,18 +1,24 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
+import https from 'https';
 import { db } from '../db.js';
 import { sql } from 'drizzle-orm';
 
 export const unsubscribeRouter = Router();
 
-// One-click unsubscribe landing page
+async function addToUnsubscribes(email, source) {
+  if (!email) return;
+  await db.execute(sql`
+    INSERT INTO unsubscribes (email, source) VALUES (${email}, ${source})
+    ON CONFLICT (email) DO NOTHING
+  `);
+}
+
+// One-click unsubscribe landing page (GET — user clicks link in email)
 unsubscribeRouter.get('/', async (req, res) => {
   const { email } = req.query;
   if (!email) return res.send('<h2>Invalid unsubscribe link.</h2>');
   try {
-    await db.execute(sql`
-      INSERT INTO unsubscribes (email) VALUES (${email})
-      ON CONFLICT (email) DO NOTHING
-    `);
+    await addToUnsubscribes(email, 'link_click');
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -30,6 +36,52 @@ unsubscribeRouter.get('/', async (req, res) => {
   } catch(err) { res.status(500).send('Error processing unsubscribe.'); }
 });
 
+// RFC 8058 one-click POST — Gmail/Yahoo send this when the native unsubscribe button is clicked.
+// Body: application/x-www-form-urlencoded with List-Unsubscribe=One-Click
+unsubscribeRouter.post('/', async (req, res) => {
+  const email = req.query.email;
+  if (!email) return res.status(400).json({ error: 'missing email' });
+  try {
+    await addToUnsubscribes(email, 'one_click');
+    res.json({ ok: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// SES complaint/bounce SNS webhook.
+// In AWS: SES → Configuration Set → SNS destination → point to this endpoint.
+// SNS sends application/x-amz-sns-message content type, so we parse it as text.
+unsubscribeRouter.post('/ses-complaint', express.text({ type: '*/*' }), async (req, res) => {
+  try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const msgType = req.headers['x-amz-sns-message-type'];
+
+    // Auto-confirm SNS topic subscription
+    if (msgType === 'SubscriptionConfirmation' && body.SubscribeURL) {
+      https.get(body.SubscribeURL, () => {});
+      return res.json({ ok: true, confirmed: true });
+    }
+
+    if (msgType !== 'Notification') return res.json({ ok: true });
+
+    const message = typeof body.Message === 'string' ? JSON.parse(body.Message) : body.Message;
+    const type = message?.notificationType;
+
+    if (type === 'Complaint') {
+      const recipients = message?.complaint?.complainedRecipients || [];
+      for (const r of recipients) {
+        if (r.emailAddress) await addToUnsubscribes(r.emailAddress, 'ses_complaint').catch(() => {});
+      }
+    } else if (type === 'Bounce' && message?.bounce?.bounceType === 'Permanent') {
+      const recipients = message?.bounce?.bouncedRecipients || [];
+      for (const r of recipients) {
+        if (r.emailAddress) await addToUnsubscribes(r.emailAddress, 'ses_bounce').catch(() => {});
+      }
+    }
+
+    res.json({ ok: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
 // Webhook for Resend events (opens, clicks, bounces)
 unsubscribeRouter.post('/webhook', async (req, res) => {
   try {
@@ -40,10 +92,7 @@ unsubscribeRouter.post('/webhook', async (req, res) => {
       const type = event.type || event.event || '';
 
       if (type === 'email.bounced' || type === 'email.complained') {
-        await db.execute(sql`
-          INSERT INTO unsubscribes (email, source) VALUES (${to}, ${type})
-          ON CONFLICT (email) DO NOTHING
-        `);
+        await addToUnsubscribes(to, type).catch(() => {});
       }
 
       await db.execute(sql`
