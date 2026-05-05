@@ -12,25 +12,100 @@ const EXPIRY_OPTIONS = [
   {value:'expired',label:'Already expired'},
 ];
 
-const DEALER_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:32px 24px;background:#ffffff">
-  <div style="border-bottom:3px solid #C9A84C;padding-bottom:16px;margin-bottom:24px">
-    <h1 style="margin:0;font-size:22px;color:#0A0A0F;letter-spacing:2px;font-family:Arial,sans-serif">QUANTUM SURETY</h1>
-    <p style="margin:4px 0 0;font-size:11px;color:#888;letter-spacing:3px;font-family:Arial,sans-serif">TEXAS LICENSED SURETY AGENCY</p>
-  </div>
-  <h2 style="color:#0A0A0F;font-size:20px;margin:0 0 16px">{{business_name}} — Your TX Dealer Bond Renews {{expire_date}}</h2>
-  <p style="color:#333;line-height:1.7;margin:0 0 16px">As a licensed Texas motor vehicle dealer, you're required to carry a surety bond as part of your annual license renewal with the TXDMV. Quantum Surety makes it fast and affordable.</p>
-  <div style="background:#f9f6ef;border-left:4px solid #C9A84C;padding:16px 20px;margin:24px 0;border-radius:0 6px 6px 0">
-    <p style="margin:0 0 10px;font-weight:bold;color:#0A0A0F">Texas Dealer Bond — Competitive Rates, Same-Day Issuance</p>
-    <p style="margin:4px 0;color:#333;font-size:14px">✓ $25,000 Motor Vehicle Dealer Bond — from $100/year</p>
-    <p style="margin:4px 0;color:#333;font-size:14px">✓ Certificate issued same day — emailed directly to you</p>
-    <p style="margin:4px 0;color:#333;font-size:14px">✓ TXDMV-approved surety carrier</p>
-    <p style="margin:4px 0;color:#333;font-size:14px">✓ Fast online application — 10 minutes or less</p>
-  </div>
-  <a href="https://quantumsurety.bond/get-bond?type=dealer" style="background:#C9A84C;color:#000;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-family:Arial,sans-serif;font-size:15px">Get Your Bond Quote →</a>
-  <p style="margin:16px 0 0;color:#555;font-size:14px;font-family:Arial,sans-serif">Prefer to talk? Call us: <a href="tel:+19723799216" style="color:#C9A84C;font-weight:bold">972-379-9216</a></p>
-  <hr style="border:none;border-top:1px solid #eee;margin:32px 0"/>
-  <p style="color:#999;font-size:11px;margin:0;font-family:Arial,sans-serif">Quantum Surety LLC · Texas Licensed Surety Agency · <a href="https://quantumsurety.bond" style="color:#C9A84C">quantumsurety.bond</a> · <a href="{{unsubscribe_url}}" style="color:#999">Unsubscribe</a></p>
-</div>`;
+const DEALER_TEMPLATE = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&display=swap" rel="stylesheet"/>
+</head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,sans-serif;">
+<div style="max-width:600px;margin:0 auto;background:#ffffff;">
+
+  <!-- HEADER -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#080a0d;">
+    <tr>
+      <td width="4" style="background:#C9A84C;font-size:0;">&nbsp;</td>
+      <td style="padding:22px 28px 0 24px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td>
+              <div style="font-family:'Rajdhani',Arial,sans-serif;font-size:20px;font-weight:700;letter-spacing:5px;color:#f0f4f8;text-transform:uppercase;line-height:1;">QUANTUM SURETY</div>
+              <div style="font-size:9px;letter-spacing:3px;color:#C9A84C;text-transform:uppercase;margin-top:4px;font-weight:400;">Texas Licensed Surety Agency</div>
+            </td>
+            <td style="text-align:right;vertical-align:top;">
+              <div style="font-size:8px;letter-spacing:3px;color:#556070;text-transform:uppercase;font-family:'Rajdhani',Arial,sans-serif;">Bond Type</div>
+              <div style="font-family:'Rajdhani',Arial,sans-serif;font-size:17px;font-weight:700;color:#C9A84C;letter-spacing:3px;line-height:1.1;">GDN BOND</div>
+              <div style="font-size:8px;letter-spacing:2px;color:#556070;text-transform:uppercase;font-family:'Rajdhani',Arial,sans-serif;">TxDMV Required</div>
+            </td>
+          </tr>
+        </table>
+        <div style="height:1px;background:#C9A84C;margin:16px 0 0;opacity:0.35;"></div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- SUBHEADER -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f1318;border-bottom:1px solid #1e2830;">
+    <tr>
+      <td width="4" style="background:#C9A84C;font-size:0;">&nbsp;</td>
+      <td style="padding:13px 28px 13px 24px;">
+        <div style="font-family:'Rajdhani',Arial,sans-serif;font-size:13px;font-weight:600;letter-spacing:4px;color:#8a9eb4;text-transform:uppercase;">Motor Vehicle Dealer Compliance</div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- BODY -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
+    <tr>
+      <td style="padding:30px 32px 8px;">
+        <h2 style="font-family:'Rajdhani',Arial,sans-serif;font-size:23px;font-weight:700;color:#0A0A0F;letter-spacing:1px;margin:0 0 16px;line-height:1.25;">{{business_name}} &#8212; Your TX Dealer Bond Renews {{expire_date}}</h2>
+        <p style="color:#444444;line-height:1.75;margin:0 0 22px;font-size:15px;">As a licensed Texas motor vehicle dealer, you are required to carry a $50,000 GDN surety bond as part of your annual license renewal with TxDMV. Quantum Surety makes it fast and affordable.</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:0 32px 24px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td width="4" style="background:#C9A84C;">&nbsp;</td>
+            <td style="background:#f8f5ec;padding:18px 20px;">
+              <p style="margin:0 0 12px;font-family:'Rajdhani',Arial,sans-serif;font-weight:700;font-size:14px;letter-spacing:2px;color:#0A0A0F;text-transform:uppercase;">Texas GDN Dealer Bond &#8212; Same-Day Issuance</p>
+              <p style="margin:0 0 7px;color:#444444;font-size:14px;">&#10003;&nbsp; $50,000 GDN Bond (Texas Occ. Code &#167;503.033) &#8212; from $100/year</p>
+              <p style="margin:0 0 7px;color:#444444;font-size:14px;">&#10003;&nbsp; Certificate issued same day &#8212; emailed directly to you</p>
+              <p style="margin:0 0 7px;color:#444444;font-size:14px;">&#10003;&nbsp; TxDMV-accepted &#8212; submit directly via eLICENSING</p>
+              <p style="margin:0;color:#444444;font-size:14px;">&#10003;&nbsp; Fast online application &#8212; 10 minutes or less</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:0 32px 32px;">
+        <a href="https://www.mybondapp.com/329034247/DirectNavBond?BondType=R4210CMBA2&State=TX"
+           style="display:inline-block;background:#C9A84C;color:#000000;padding:15px 32px;text-decoration:none;font-family:'Rajdhani',Arial,sans-serif;font-size:16px;font-weight:700;letter-spacing:3px;text-transform:uppercase;">
+          GET YOUR GDN BOND QUOTE &#8594;
+        </a>
+      </td>
+    </tr>
+  </table>
+
+  <!-- FOOTER -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#080a0d;border-top:2px solid #C9A84C;">
+    <tr>
+      <td width="4" style="background:#C9A84C;font-size:0;">&nbsp;</td>
+      <td style="padding:16px 28px 16px 24px;">
+        <p style="color:#3a4a5a;font-size:10px;margin:0;line-height:1.9;letter-spacing:0.3px;font-family:Arial,sans-serif;">
+          Quantum Surety LLC &nbsp;&#183;&nbsp; Texas Licensed Surety Agency &nbsp;&#183;&nbsp; TDI Licensed #3480229<br/>
+          <a href="https://quantumsurety.bond" style="color:#C9A84C;text-decoration:none;">quantumsurety.bond</a>
+          &nbsp;&#183;&nbsp;
+          To unsubscribe reply STOP
+        </p>
+      </td>
+    </tr>
+  </table>
+
+</div>
+</body>
+</html>`;
 
 const BLANK_FORM = {
   campaign_name:'',
@@ -40,7 +115,7 @@ const BLANK_FORM = {
   from_email:'info@quantumsurety.bond',
 };
 
-const BLANK_FILTERS = { search:'', city:'', county:'', license_type:'', expiring:'60', has_email:'' };
+const BLANK_FILTERS = { search:'', city:'', county:'', license_type:'', expiring:'', has_email:'' };
 
 function expiryColor(dateStr) {
   if (!dateStr) return 'var(--text-dim)';
@@ -80,19 +155,21 @@ export default function Dealers() {
   const [selected,setSelected] = useState(null);
   const [sentIds,setSentIds] = useState(new Set());
 
+  const safeJson = async(r) => { const t=await r.text(); try{return JSON.parse(t);}catch{throw new Error(`Server error (${r.status})`);} };
+
   const loadStats = () =>
-    apiFetch('/api/dealers/stats').then(r=>r.json()).then(setStats).catch(()=>{});
+    apiFetch('/api/dealers/stats').then(safeJson).then(setStats).catch(()=>{});
 
   const loadRows = useCallback(() => {
     setLoading(true);
     const p = new URLSearchParams({ page, limit:50, ...filters });
-    apiFetch(`/api/dealers?${p}`).then(r=>r.json()).then(j=>{
+    apiFetch(`/api/dealers?${p}`).then(safeJson).then(j=>{
       setRows(j.data||[]); setTotal(j.total||0); setPages(j.pages||1);
     }).catch(()=>{}).finally(()=>setLoading(false));
   }, [page, filters]);
 
   const loadSentIds = () =>
-    apiFetch('/api/dealer-campaigns/sent-ids').then(r=>r.json())
+    apiFetch('/api/dealer-campaigns/sent-ids').then(safeJson)
       .then(j=>setSentIds(new Set(j.ids||[]))).catch(()=>{});
 
   useEffect(()=>{ loadStats(); loadSentIds(); },[]);
@@ -104,7 +181,7 @@ export default function Dealers() {
     if (!showCampaign) return;
     setAudienceCount(null);
     apiFetch('/api/dealer-campaigns/count',{method:'POST',body:JSON.stringify({filters,skip_sent:skipSent})})
-      .then(r=>r.json()).then(j=>setAudienceCount(j.count??0)).catch(()=>setAudienceCount(0));
+      .then(safeJson).then(j=>setAudienceCount(j.count??0)).catch(()=>setAudienceCount(0));
   },[showCampaign, filters, skipSent]);
 
   const applyFilters = () => { setFilters({...pendingFilters}); setPage(1); };
@@ -116,7 +193,7 @@ export default function Dealers() {
         method:'POST',
         body:JSON.stringify({...form, filters, skip_sent:skipSent, campaign_name:form.campaign_name||form.subject}),
       });
-      const j = await r.json();
+      const j = await safeJson(r);
       if (j.error) setSendError(j.error);
       else { setSendResult(j); loadStats(); loadSentIds(); }
     } catch(e) { setSendError(e.message); }
@@ -124,10 +201,12 @@ export default function Dealers() {
   };
 
   const loadHistory = async() => {
-    const r = await apiFetch('/api/dealer-campaigns/history?limit=200');
-    const j = await r.json();
-    setHistory(j.rows||[]);
-    setShowHistory(true);
+    try {
+      const r = await apiFetch('/api/dealer-campaigns/history?limit=200');
+      const j = await safeJson(r);
+      setHistory(j.rows||[]);
+      setShowHistory(true);
+    } catch(e) { setShowHistory(true); }
   };
 
   return (
@@ -322,8 +401,9 @@ export default function Dealers() {
               {sendResult?(
                 <div style={{textAlign:'center',padding:'24px 0'}}>
                   <CheckCircle size={32} style={{color:'#4CC97A',margin:'0 auto 12px'}}/>
-                  <div style={{color:'#4CC97A',fontSize:16,fontWeight:600,marginBottom:6}}>Sent!</div>
-                  <div style={{color:'var(--text-dim)',fontSize:12}}>{sendResult.sent} sent · {sendResult.failed} failed</div>
+                  <div style={{color:'#4CC97A',fontSize:16,fontWeight:600,marginBottom:6}}>Campaign Queued!</div>
+                  <div style={{color:'var(--text-dim)',fontSize:12}}>{(sendResult.total||0).toLocaleString()} emails sending in background</div>
+                  <div style={{color:'var(--text-dim)',fontSize:11,marginTop:4}}>Check Send History to track progress</div>
                   <button onClick={()=>{setSendResult(null);setShowCampaign(false);}}
                     style={{marginTop:16,padding:'8px 20px',borderRadius:8,background:'var(--gold)',color:'#0A0A0F',border:'none',cursor:'pointer',fontWeight:700,fontSize:13}}>
                     Done

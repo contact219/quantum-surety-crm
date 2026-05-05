@@ -5,7 +5,7 @@ services:
     container_name: qs-crm-backend
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql://scraper:scraper2024@host.docker.internal:5433/minority_contractors
+      - DATABASE_URL=postgresql://quantum_user:Qs2024Secure!@host.docker.internal:5433/quantum_surety
       - RESEND_API_KEY=${RESEND_API_KEY}
       - PORT=4000
     ports:
