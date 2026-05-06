@@ -231,8 +231,10 @@ dripRouter.post('/run', async (req, res) => {
           unsubscribe_url: unsubUrl,
         };
 
-        const html = interpolate(schedule.body, vars);
+        const rawHtml = interpolate(schedule.body, vars);
         const subj = interpolate(schedule.subject, vars);
+        const pixelUrl = `https://crm-api.permitpilot.online/api/tracking/open?drip=${schedule.id}&e=${encodeURIComponent(c.email)}`;
+        const html = rawHtml.replace('</div>', `<img src="${pixelUrl}" width="1" height="1" style="display:none" /></div>`);
 
         try {
           const r = await sendEmail({

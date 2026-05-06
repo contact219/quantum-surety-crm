@@ -32,6 +32,21 @@ trackingRouter.post('/url', async (req, res) => {
   res.json({ url: tracked });
 });
 
+// 1x1 open-tracking pixel
+const PIXEL = Buffer.from(
+  'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'
+);
+trackingRouter.get('/open', async (req, res) => {
+  const { drip = '', e = '' } = req.query;
+  try {
+    await db.execute(sql`
+      INSERT INTO email_events (email_id, contact_email, event_type, metadata)
+      VALUES ('', ${e}, 'email.opened', ${JSON.stringify({ drip_id: drip, source: 'pixel' })}::jsonb)
+    `);
+  } catch (_) { /* non-blocking */ }
+  res.set('Content-Type', 'image/gif').set('Cache-Control', 'no-store').send(PIXEL);
+});
+
 // Stats
 trackingRouter.get('/stats', async (req, res) => {
   try {
