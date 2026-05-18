@@ -196,15 +196,15 @@ export default function Leads() {
   ];
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1300, margin: '0 auto' }}>
+    <div className='page-wrap' style={{ maxWidth: 1300, margin: '0 auto' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div className='page-header'>
         <div>
           <div style={{ fontSize: 11, fontFamily: 'monospace', letterSpacing: 3, color: 'var(--gold)', marginBottom: 4 }}>PIPELINE</div>
           <h1 style={{ fontFamily: '"Bebas Neue",cursive', fontSize: 36, letterSpacing: 3, color: 'white', margin: 0 }}>LEADS</h1>
           <div className="gold-line" style={{ width: 64, marginTop: 8 }} />
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div className='page-header-actions'>
           <button onClick={() => exportCSV(leads)}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-dim)', fontSize: 12, cursor: 'pointer' }}>
             <Download size={13} /> Export CSV
@@ -228,7 +228,7 @@ export default function Leads() {
       )}
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 10, marginBottom: 20 }}>
+      <div className='r-grid-6' style={{ marginBottom: 20 }}>
         {statCards.map(s => (
           <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px', textAlign: 'center' }}>
             <div style={{ fontSize: 26, fontWeight: 700, color: s.color, fontFamily: '"Bebas Neue",cursive', letterSpacing: 2 }}>{s.value}</div>
@@ -238,7 +238,7 @@ export default function Leads() {
       </div>
 
       {/* Date range tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
+      <div className='date-tabs'>
         {DATE_TABS.map(t => (
           <button key={t.key} onClick={() => setDateRange(t.key)}
             style={{
@@ -253,7 +253,7 @@ export default function Leads() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className='filter-row'>
         <div style={{ position: 'relative', flex: '1', minWidth: 200 }}>
           <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, phone…"
@@ -287,7 +287,7 @@ export default function Leads() {
         {!loading && leads.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No leads found.</div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <div className='tbl-wrap'>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--muted)' }}>

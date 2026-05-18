@@ -112,7 +112,7 @@ export default function Dashboard() {
   ] : [];
 
   return (
-    <div style={{padding:'2rem',overflowY:'auto',height:'100%'}}>
+    <div className='page-wrap' style={{overflowY:'auto',height:'100%'}}>
       <div style={{marginBottom:'2rem'}}>
         <div style={{fontSize:11,fontFamily:'monospace',letterSpacing:3,color:'var(--gold)',marginBottom:4}}>OVERVIEW</div>
         <h1 style={{fontFamily:'"Bebas Neue",cursive',fontSize:36,letterSpacing:3,color:'white',margin:0}}>Dashboard</h1>
@@ -120,7 +120,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
+      <div className='r-grid-4' style={{marginBottom:24}}>
         {statCards.map(({label,value,icon:Icon,color})=>(
           <div key={label} style={{borderRadius:12,padding:16,border:'1px solid var(--border)',background:'var(--surface)'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
@@ -133,7 +133,7 @@ export default function Dashboard() {
       </div>
 
       {/* Charts row */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:24}}>
+      <div className='r-grid-3' style={{marginBottom:24}}>
         {/* Contacts by state */}
         <div style={{borderRadius:12,padding:16,border:'1px solid var(--border)',background:'var(--surface)'}}>
           <div style={{fontSize:10,fontFamily:'monospace',letterSpacing:2,color:'var(--gold)',marginBottom:12}}>CONTACTS BY STATE</div>
@@ -185,7 +185,7 @@ export default function Dashboard() {
       )}
 
       {/* Bottom row */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+      <div className='r-grid-2'>
 
         {/* Drip schedules */}
         <div style={{borderRadius:12,border:'1px solid var(--border)',background:'var(--surface)',overflow:'hidden'}}>

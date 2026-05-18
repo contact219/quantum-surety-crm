@@ -173,7 +173,7 @@ export default function Contacts() {
 
         {/* Table */}
         <div className="flex-1 overflow-auto">
-          <table className="w-full text-sm" style={{tableLayout:'fixed'}}>
+          <div className="tbl-wrap"><table className="w-full text-sm" style={{tableLayout:'fixed'}}>
             <colgroup>
               <col style={{width:'4%'}}/>
               <col style={{width:'25%'}}/>
@@ -226,7 +226,7 @@ export default function Contacts() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
 
         {/* Pagination */}
@@ -259,7 +259,7 @@ export default function Contacts() {
 
       {/* Detail panel */}
       {selected&&!showCompose&&(
-        <div className="w-88 border-l flex flex-col flex-shrink-0" style={{width:'22rem',background:'var(--surface)',borderColor:'var(--border)'}}>
+        <div className="contact-detail-panel border-l flex flex-col flex-shrink-0" style={{width:'22rem',background:'var(--surface)',borderColor:'var(--border)'}}>
           <div className="p-4 border-b flex items-start justify-between" style={{borderColor:'var(--border)'}}>
             <div className="flex-1 min-w-0 pr-2">
               <div className="font-medium text-white leading-tight truncate">{selected.company_name}</div>

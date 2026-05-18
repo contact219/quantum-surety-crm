@@ -1,13 +1,134 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 :root {
   --gold: #C9A84C; --dark: #0A0A0F; --surface: #12121A;
   --border: #1E1E2E; --muted: #2A2A3E; --text: #E8E8F0; --text-dim: #6B6B8A;
 }
+
 * { box-sizing: border-box; }
 body { background: var(--dark); color: var(--text); font-family: 'DM Sans', sans-serif; margin: 0; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: var(--surface); }
 ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
 .gold-line { background: linear-gradient(90deg, var(--gold), transparent); height: 1px; }
+
+/* ── Responsive grid utilities ── */
+.r-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.r-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.r-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.r-grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+
+@media (max-width: 900px) {
+  .r-grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .r-grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .r-grid-6 { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .r-grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .r-grid-3 { grid-template-columns: 1fr; }
+  .r-grid-2 { grid-template-columns: 1fr; }
+  .r-grid-6 { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Table horizontal scroll ── */
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tbl-wrap table { min-width: 640px; }
+
+/* ── Page wrapper: shrink padding on mobile ── */
+.page-wrap { padding: 24px 28px; }
+@media (max-width: 640px) {
+  .page-wrap { padding: 14px 14px; }
+}
+
+/* ── Header action row: stack on mobile ── */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 12px;
+}
+.page-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 600px) {
+  .page-header { flex-direction: column; align-items: flex-start; }
+  .page-header-actions { width: 100%; }
+  .page-header-actions button { flex: 1; justify-content: center; }
+}
+
+/* ── Filter row: wrap on mobile ── */
+.filter-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* ── Date tab row: horizontal scroll on very small screens ── */
+.date-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+.date-tabs::-webkit-scrollbar { height: 0; }
+
+/* ── Stat card: compact on mobile ── */
+@media (max-width: 640px) {
+  .stat-card { padding: 10px 12px !important; }
+  .stat-card .stat-value { font-size: 20px !important; }
+}
+
+/* ── Contacts: side panel becomes bottom sheet on mobile ── */
+@media (max-width: 768px) {
+  .contact-detail-panel {
+    position: fixed !important;
+    inset: auto 0 0 0 !important;
+    width: 100% !important;
+    max-height: 70vh;
+    overflow-y: auto;
+    border-left: none !important;
+    border-top: 1px solid var(--border) !important;
+    border-radius: 16px 16px 0 0;
+    z-index: 50;
+  }
+}
+
+/* ── Notary / Dealer campaign panel: full width on mobile ── */
+@media (max-width: 768px) {
+  .campaign-panel {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-height: 100vh;
+    overflow-y: auto;
+    z-index: 60;
+    border-radius: 0 !important;
+  }
+}
+
+/* ── Modal max-width safety on mobile ── */
+@media (max-width: 600px) {
+  [style*="width: 420px"],
+  [style*="width: 380px"],
+  [style*="width: 360px"],
+  [style*="width:420px"],
+  [style*="width:380px"],
+  [style*="width:360px"] {
+    width: 94vw !important;
+    max-width: 94vw !important;
+  }
+}
+
+/* ── Bebas Neue display font ── */
+.font-display { font-family: "Bebas Neue", cursive; }
