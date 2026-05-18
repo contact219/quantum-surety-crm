@@ -10,6 +10,7 @@ import Dealers from './pages/Dealers.jsx';
 import Login from './pages/Login.jsx';
 import UsersPage from './pages/Users.jsx';
 import AIPage from './pages/AI.jsx';
+import LeadsPage from './pages/Leads.jsx';
 import {getToken,getUser,clearAuth} from './auth.js';
 
 // GA4 tracking
@@ -33,6 +34,7 @@ const nav = [
   {to:'/campaigns',icon:Mail,label:'Campaigns',roles:['admin','sales']},
   {to:'/notaries',icon:FileText,label:'Notary Bonds',roles:['admin','sales','readonly']},
   {to:'/dealers',icon:Car,label:'License & Permit',roles:['admin','sales','readonly']},
+  {to:'/leads',icon:FileText,label:'Leads',roles:['admin','sales']},
   {to:'/import',icon:Upload,label:'Import',roles:['admin']},
   {to:'/ai',icon:Sparkles,label:'AI Tools',roles:['admin','sales']},
   {to:'/users',icon:Shield,label:'Users',roles:['admin']},
@@ -134,6 +136,7 @@ export default function App() {
             <Route path="/campaigns" element={user.role!=='readonly'?<Campaigns/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
             <Route path="/notaries" element={<Notaries/>}/>
             <Route path="/dealers" element={<Dealers/>}/>
+            <Route path="/leads" element={user.role!=='readonly'?<LeadsPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
             <Route path="/import" element={user.role==='admin'?<ImportPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
             <Route path="/ai" element={user.role!=='readonly'?<AIPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
             <Route path="/users" element={user.role==='admin'?<UsersPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
