@@ -103,7 +103,8 @@ dripRouter.post('/run', async (req, res) => {
           AND email NOT IN (SELECT email FROM unsubscribes)
           AND email NOT IN (
             SELECT email FROM notary_campaign_sends
-            WHERE status IN ('sent','suppressed')
+            WHERE drip_id = ${schedule.id}
+            AND status IN ('sent','suppressed')
             AND sent_at > NOW() - INTERVAL '60 days'
           )
           ${suretyCond} ${cityCond} ${expCond}
@@ -126,7 +127,8 @@ dripRouter.post('/run', async (req, res) => {
           )
           AND n.email NOT IN (
             SELECT email FROM notary_campaign_sends
-            WHERE campaign_name LIKE 'FOLLOW-UP:%' AND status = 'sent'
+            WHERE drip_id = ${schedule.id}
+            AND campaign_name LIKE 'FOLLOW-UP:%' AND status = 'sent'
           )
           AND n.expire_date >= CURRENT_DATE
           ORDER BY n.email, n.expire_date ASC
@@ -157,7 +159,8 @@ dripRouter.post('/run', async (req, res) => {
           AND email NOT IN (SELECT email FROM unsubscribes)
           AND id NOT IN (
             SELECT dealer_id FROM dealer_campaign_sends
-            WHERE status = 'sent'
+            WHERE drip_id = ${schedule.id}
+            AND status = 'sent'
             AND sent_at > NOW() - INTERVAL '60 days'
           )
           ${cityCond} ${countyCond} ${typeCond} ${expCond}
@@ -187,7 +190,8 @@ dripRouter.post('/run', async (req, res) => {
           )
           AND d.email NOT IN (
             SELECT email FROM dealer_campaign_sends
-            WHERE campaign_name LIKE 'FOLLOW-UP:%' AND status = 'sent'
+            WHERE drip_id = ${schedule.id}
+            AND campaign_name LIKE 'FOLLOW-UP:%' AND status = 'sent'
           )
           AND d.license_expiration >= CURRENT_DATE
           ORDER BY d.email, d.license_expiration ASC
@@ -201,20 +205,73 @@ dripRouter.post('/run', async (req, res) => {
           _type: 'dealer',
         }));
 
-      // ── CONTRACTOR (legacy) ───────────────────────────────────────────────
-      } else {
-        const stateCond = filters.state ? sql`AND state = ${filters.state}` : sql``;
+      // ── LAPSED NOTARY (bond already expired) ─────────────────────────────
+      } else if (schedule.contact_type === 'lapsed_notary') {
+        const cityPct  = filters.city ? `%${filters.city}%` : null;
+        const cityCond = cityPct ? sql`AND city ILIKE ${cityPct}` : sql``;
         const result = await db.execute(sql`
-          SELECT company_name as first_name, '' as last_name,
-                 CASE WHEN website ~ '^[^@]+@[^@]+\.[^@]+$' THEN website ELSE email END as email,
-                 null as expire_date, certification_type as surety_company
-          FROM contractors
-          WHERE (website ~ '^[^@]+@[^@]+\.[^@]+$' OR (email IS NOT NULL AND email != ''))
-          AND (website IS NULL OR website NOT IN (SELECT email FROM unsubscribes))
-          ${stateCond}
+          SELECT id, first_name, last_name, email, expire_date, surety_company FROM notaries
+          WHERE email != '' AND email IS NOT NULL
+          AND expire_date < CURRENT_DATE
+          AND expire_date > CURRENT_DATE - INTERVAL '2 years'
+          AND email NOT IN (SELECT email FROM unsubscribes)
+          AND email NOT IN (
+            SELECT email FROM notary_campaign_sends
+            WHERE drip_id = ${schedule.id}
+            AND status IN ('sent','suppressed')
+            AND sent_at > NOW() - INTERVAL '60 days'
+          )
+          ${cityCond}
+          ORDER BY expire_date DESC LIMIT ${limit}
+        `);
+        contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
+
+      // ── NOTARY OPENER FOLLOW-UP (opened email in last 30d) ────────────────
+      } else if (schedule.contact_type === 'notary_opener') {
+        const result = await db.execute(sql`
+          SELECT DISTINCT ON (n.email)
+            n.id, n.first_name, n.last_name, n.email, n.expire_date, n.surety_company
+          FROM notaries n
+          WHERE n.email != '' AND n.email IS NOT NULL
+          AND n.email NOT IN (SELECT email FROM unsubscribes)
+          AND n.email IN (
+            SELECT contact_email FROM email_events
+            WHERE event_type = 'email.opened'
+            AND created_at > NOW() - INTERVAL '30 days'
+          )
+          AND n.email NOT IN (
+            SELECT email FROM notary_campaign_sends
+            WHERE drip_id = ${schedule.id}
+            AND campaign_name LIKE 'WARM-OPEN:%' AND status = 'sent'
+            AND sent_at > NOW() - INTERVAL '60 days'
+          )
+          ORDER BY n.email, n.expire_date ASC
           LIMIT ${limit}
         `);
+        contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
+
+      // ── CONTRACTOR ────────────────────────────────────────────────────────
+      } else if (schedule.contact_type === 'contractor') {
+        const stateCond = filters.state ? sql`AND state = ${filters.state}` : sql``;
+        const certCond  = filters.cert_type ? sql`AND certification_type ILIKE ${'%' + filters.cert_type + '%'}` : sql``;
+        const result = await db.execute(sql`
+          SELECT id, company_name as first_name, '' as last_name, email,
+                 null::date as expire_date, certification_type as surety_company, city
+          FROM contractors
+          WHERE email IS NOT NULL AND email != ''
+          AND email NOT IN (SELECT email FROM unsubscribes)
+          AND email NOT IN (
+            SELECT contact_email FROM email_events
+            WHERE contact_type = 'contractor' AND event_type = 'email.sent'
+            AND created_at > NOW() - INTERVAL '90 days'
+          )
+          ${stateCond} ${certCond}
+          ORDER BY company_name ASC LIMIT ${limit}
+        `);
         contacts = result.rows.map(r => ({ ...r, _type: 'contractor' }));
+
+      } else {
+        console.warn(`Unknown contact_type: ${schedule.contact_type} for drip ${schedule.id}`);
       }
 
       let sent = 0;
@@ -237,8 +294,13 @@ dripRouter.post('/run', async (req, res) => {
 
         const rawHtml = interpolate(schedule.body, vars);
         const subj = interpolate(schedule.subject, vars);
-        const pixelUrl = `https://crm-api.permitpilot.online/api/tracking/open?drip=${schedule.id}&e=${encodeURIComponent(c.email)}`;
-        const html = rawHtml.replace('</div>', `<img src="${pixelUrl}" width="1" height="1" style="display:none" /></div>`);
+        const pixelUrl = `https://crm-api.permitpilot.online/api/tracking/open?drip=${schedule.id}&e=${encodeURIComponent(c.email)}&t=${encodeURIComponent(c._type)}`;
+        const linkedHtml = rawHtml.replace(/href="(https?:\/\/quantumsurety\.bond[^"]*)"/g, (m, u) => {
+          if (u.includes('/unsubscribe') || u.includes('/api/tracking/')) return m;
+          const tracked = `https://crm-api.permitpilot.online/api/tracking/click?drip=${schedule.id}&e=${encodeURIComponent(c.email)}&t=${encodeURIComponent(c._type)}&url=${encodeURIComponent(u)}`;
+          return `href="${tracked}"`;
+        });
+        const html = linkedHtml.replace('</div>', `<img src="${pixelUrl}" width="1" height="1" style="display:none" /></div>`);
 
         try {
           const r = await sendEmail({
@@ -254,8 +316,8 @@ dripRouter.post('/run', async (req, res) => {
 
           const emailId = r.id || '';
           await db.execute(sql`
-            INSERT INTO email_events (email_id, contact_email, event_type, metadata)
-            VALUES (${emailId}, ${c.email}, 'email.sent', ${JSON.stringify({ drip_id: schedule.id })}::jsonb)
+            INSERT INTO email_events (email_id, contact_email, contact_type, event_type, metadata)
+            VALUES (${emailId}, ${c.email}, ${c._type}, 'email.sent', ${JSON.stringify({ drip_id: schedule.id })}::jsonb)
           `);
 
           if (c._type === 'notary') {
@@ -346,4 +408,120 @@ dripRouter.post('/alert', async (req, res) => {
     });
     res.json({ ok: true, sent_to: to_email, count: notaries.length });
   } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── AUTO-PIPELINE ─────────────────────────────────────────────────────────────
+// Nightly job: add anyone who opened/clicked a drip email in the last 25h to leads
+
+dripRouter.post('/auto-pipeline', async (req, res) => {
+  let contractors = 0, notaries = 0, dealers = 0;
+  try {
+    const cr = await db.execute(sql`
+      INSERT INTO leads (name, email, phone, bond_type, source, status, notes, lead_time, created_at, updated_at)
+      SELECT DISTINCT ON (c.email)
+        c.company_name, c.email,
+        CASE WHEN c.phone ~ '^[0-9]' THEN c.phone ELSE '' END,
+        'Texas Contractor License Bond',
+        'auto-pipeline — drip open/click',
+        'new',
+        'Auto-added ' || TO_CHAR(NOW() AT TIME ZONE 'America/Chicago','Mon DD') ||
+          ': opened/clicked contractor email. HUB certified, ' || c.city || ' TX.',
+        NOW(), NOW(), NOW()
+      FROM email_events e
+      JOIN contractors c ON c.email = e.contact_email
+      WHERE e.event_type IN ('email.opened','email.clicked')
+        AND e.created_at > NOW() - INTERVAL '25 hours'
+        AND e.contact_type = 'contractor'
+        AND c.email IS NOT NULL AND c.email != ''
+        AND c.email NOT IN (SELECT email FROM leads WHERE created_at > NOW() - INTERVAL '7 days')
+      ON CONFLICT (email, lead_time) DO NOTHING
+      RETURNING id
+    `);
+    contractors = cr.rows.length;
+
+    const nr = await db.execute(sql`
+      INSERT INTO leads (name, email, phone, bond_type, source, status, notes, lead_time, created_at, updated_at)
+      SELECT DISTINCT ON (n.email)
+        n.first_name || ' ' || n.last_name, n.email, '',
+        'Texas Notary Bond',
+        'auto-pipeline — drip open/click',
+        'new',
+        'Auto-added ' || TO_CHAR(NOW() AT TIME ZONE 'America/Chicago','Mon DD') ||
+          ': opened/clicked notary email. Expires: ' ||
+          COALESCE(TO_CHAR(n.expire_date,'Mon DD YYYY'),'unknown'),
+        NOW(), NOW(), NOW()
+      FROM email_events e
+      JOIN notaries n ON n.email = e.contact_email
+      WHERE e.event_type IN ('email.opened','email.clicked')
+        AND e.created_at > NOW() - INTERVAL '25 hours'
+        AND e.contact_type = 'notary'
+        AND n.email IS NOT NULL AND n.email != ''
+        AND n.email NOT IN (SELECT email FROM leads WHERE created_at > NOW() - INTERVAL '7 days')
+      ON CONFLICT (email, lead_time) DO NOTHING
+      RETURNING id
+    `);
+    notaries = nr.rows.length;
+
+    const dr = await db.execute(sql`
+      INSERT INTO leads (name, email, phone, bond_type, source, status, notes, lead_time, created_at, updated_at)
+      SELECT DISTINCT ON (d.email)
+        d.business_name, d.email, COALESCE(d.phone,''),
+        'Texas GDN Dealer Bond',
+        'auto-pipeline — drip open/click',
+        'new',
+        'Auto-added ' || TO_CHAR(NOW() AT TIME ZONE 'America/Chicago','Mon DD') ||
+          ': opened/clicked dealer email. License expires: ' ||
+          COALESCE(TO_CHAR(d.license_expiration,'Mon DD YYYY'),'unknown'),
+        NOW(), NOW(), NOW()
+      FROM email_events e
+      JOIN auto_dealers d ON d.email = e.contact_email
+      WHERE e.event_type IN ('email.opened','email.clicked')
+        AND e.created_at > NOW() - INTERVAL '25 hours'
+        AND e.contact_type = 'dealer'
+        AND d.email IS NOT NULL AND d.email != ''
+        AND d.email NOT IN (SELECT email FROM leads WHERE created_at > NOW() - INTERVAL '7 days')
+      ON CONFLICT (email, lead_time) DO NOTHING
+      RETURNING id
+    `);
+    dealers = dr.rows.length;
+
+    console.log(`[Auto-pipeline] contractors=${contractors} notaries=${notaries} dealers=${dealers}`);
+    res.json({ ok: true, inserted: contractors + notaries + dealers, contractors, notaries, dealers });
+  } catch(err) {
+    console.error('[Auto-pipeline]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── CAMPAIGN ANALYTICS ────────────────────────────────────────────────────────
+
+dripRouter.get('/analytics', async (req, res) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        ds.id, ds.name, ds.contact_type, ds.status,
+        ds.emails_per_day, ds.total_sent, ds.last_run,
+        COUNT(DISTINCT CASE WHEN ee.event_type = 'email.opened'  THEN ee.contact_email END)::int AS unique_opens,
+        COUNT(DISTINCT CASE WHEN ee.event_type = 'email.clicked' THEN ee.contact_email END)::int AS unique_clicks,
+        COUNT(CASE WHEN ee.event_type = 'email.opened'  THEN 1 END)::int AS total_opens,
+        COUNT(CASE WHEN ee.event_type = 'email.clicked' THEN 1 END)::int AS total_clicks,
+        COUNT(DISTINCT CASE WHEN ee.event_type = 'email.opened' AND ee.created_at > NOW() - INTERVAL '7 days'
+          THEN ee.contact_email END)::int AS opens_7d
+      FROM drip_schedules ds
+      LEFT JOIN email_events ee
+        ON (ee.metadata->>'drip_id')::text = ds.id::text
+      GROUP BY ds.id
+      ORDER BY ds.total_sent DESC
+    `);
+
+    const rows = result.rows.map(r => ({
+      ...r,
+      open_rate:  r.total_sent > 0 ? Math.round((r.unique_opens  / r.total_sent) * 100) : 0,
+      click_rate: r.total_sent > 0 ? Math.round((r.unique_clicks / r.total_sent) * 100) : 0,
+    }));
+
+    res.json(rows);
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
 });
