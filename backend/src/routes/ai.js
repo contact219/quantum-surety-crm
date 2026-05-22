@@ -161,7 +161,7 @@ Tone: ${tone || 'professional but friendly'}
 Quantum Surety details:
 - Texas-licensed surety agency
 - Carrier: RLI Insurance Company (A+ rated)
-- Notary bonds: starting $30/year, instant issuance
+- Notary bonds: starting $50/year, instant issuance
 - Contractor bonds: same-day, no collateral for most
 - Quote URL: https://quantumsurety.bond/quote
 - Commission: 55% on notary bonds (for referrals)
@@ -233,7 +233,7 @@ Write a professional, empathetic email response that:
 
 Key facts about Quantum Surety:
 - RLI Insurance: A+ AM Best rated, one of the most respected surety carriers
-- Notary bonds from $30/year (often cheaper than competitors)
+- Notary bonds from $50/year (often cheaper than competitors)
 - Same-day issuance — no waiting
 - 4-year term available (bond once for entire commission)
 - Texas-licensed agency with local expertise
@@ -241,7 +241,7 @@ Key facts about Quantum Surety:
 
 Common objections and responses:
 - "Happy with current carrier" → RLI is likely cheaper and faster
-- "Too expensive" → Starting at $30/year, cheaper than most
+- "Too expensive" → Starting at $50/year, cheaper than most
 - "Already renewed" → Note their next renewal date
 - "Don't need it" → Required by Texas law for notary commission
 

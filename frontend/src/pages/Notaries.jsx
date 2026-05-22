@@ -27,7 +27,7 @@ const NOTARY_TEMPLATE = `<div style="font-family:Georgia,serif;max-width:600px;m
   <h2 style="color:#0A0A0F;font-size:20px;margin:0 0 16px">{{first_name}}, Your Texas Notary Bond Expires {{expire_date}}</h2>
   <p style="color:#333;line-height:1.7;margin:0 0 16px">As a Texas notary public, your surety bond must remain active throughout your commission period. Don't let a lapsed bond put your commission at risk.</p>
   <div style="background:#f9f6ef;border-left:4px solid #C9A84C;padding:16px 20px;margin:24px 0;border-radius:0 6px 6px 0">
-    <p style="margin:0 0 10px;font-weight:bold;color:#0A0A0F">Renew with Quantum Surety — Starting at $30/year</p>
+    <p style="margin:0 0 10px;font-weight:bold;color:#0A0A0F">Renew with Quantum Surety — Starting at $50/year</p>
     <p style="margin:4px 0;color:#333;font-size:14px">✓ Instant online issuance — certificate emailed immediately</p>
     <p style="margin:4px 0;color:#333;font-size:14px">✓ RLI Insurance Company — Texas approved carrier</p>
     <p style="margin:4px 0;color:#333;font-size:14px">✓ 4-year term available — bond once for your full commission</p>
