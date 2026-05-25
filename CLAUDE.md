@@ -62,6 +62,20 @@ When SES records a complaint or hard bounce, SNS POSTs to the backend which auto
 - `campaigns` / `campaign_sends` — contractor campaigns
 - `email_events` — open/click/bounce event log
 
+## Ecosystem Snapshot
+
+Current live systems are documented in `ECOSYSTEM-AUDIT-2026-05-25.md` at the repo root.
+
+Covered systems:
+- `quantumsurety.bond`
+- `permitpilot.online`
+- `partners.quantumsurety.bond`
+- `verify.quantumsurety.bond`
+- CRM backend (`/api/*` on the internal service)
+- Voice agent (`voice-agent.permitpilot.online`)
+
+Use that audit note as the canonical status snapshot when checking what is live, what is gated by auth, and what still needs a deploy or DB check.
+
 ## Environment Variables (backend)
 
 - `DATABASE_URL` — PostgreSQL connection string
