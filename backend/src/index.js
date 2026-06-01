@@ -15,6 +15,7 @@ import { analyticsRouter } from './routes/analytics.js';
 import { notaryCampaignsRouter } from './routes/notary-campaigns.js';
 import { dealersRouter } from './routes/dealers.js';
 import { contractorsRouter } from './routes/contractors.js';
+import { tdlrRouter } from './routes/tdlr.js';
 import { dealerCampaignsRouter } from './routes/dealer-campaigns.js';
 import { leadsRouter } from './routes/leads.js';
 
@@ -30,6 +31,7 @@ app.use('/api/notaries', notariesRouter);
 app.use('/api/notary-campaigns', notaryCampaignsRouter);
 app.use('/api/dealers', dealersRouter);
 app.use('/api/contractors', contractorsRouter);
+app.use('/api/tdlr', tdlrRouter);
 app.use('/api/dealer-campaigns', dealerCampaignsRouter);
 app.use('/api/unsubscribe', unsubscribeRouter);
 app.use('/api/pipeline', pipelineRouter);

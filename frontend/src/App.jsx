@@ -9,6 +9,7 @@ import Notaries from './pages/Notaries.jsx';
 import Dealers from './pages/Dealers.jsx';
 import Contractors from './pages/Contractors.jsx';
 import ContractorLicenses from './pages/ContractorLicenses.jsx';
+import TDLRLicenses from './pages/TDLRLicenses.jsx';
 import Login from './pages/Login.jsx';
 import UsersPage from './pages/Users.jsx';
 import AIPage from './pages/AI.jsx';
@@ -40,6 +41,7 @@ const nav = [
   {to:'/dealers',icon:Car,label:'GDN / Dealer',roles:['admin','sales','readonly']},
   {to:'/contractors',icon:FileText,label:'Contractor Bonds',roles:['admin','sales','readonly']},
   {to:'/contractor-licenses',icon:FileText,label:'License Lookup',roles:['admin','sales','readonly']},
+  {to:'/tdlr',icon:FileText,label:'TDLR Registry',roles:['admin','sales','readonly']},
   {to:'/leads',icon:FileText,label:'Leads',roles:['admin','sales']},
   {to:'/calls',icon:Phone,label:'Call Logs',roles:['admin','sales']},
   {to:'/import',icon:Upload,label:'Import',roles:['admin']},
@@ -145,6 +147,7 @@ export default function App() {
             <Route path="/dealers" element={<Dealers/>}/>
             <Route path="/contractors" element={<Contractors/>}/>
             <Route path="/contractor-licenses" element={<ContractorLicenses/>}/>
+            <Route path="/tdlr" element={<TDLRLicenses/>}/>
             <Route path="/leads" element={user.role!=='readonly'?<LeadsPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
             <Route path="/import" element={user.role==='admin'?<ImportPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
             <Route path="/ai" element={user.role!=='readonly'?<AIPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
