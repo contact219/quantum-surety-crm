@@ -1,5 +1,5 @@
 import express from 'express';
-import { db } from '../db.js';
+import { db, pool } from '../db.js';
 import { sql } from 'drizzle-orm';
 
 export const leadsRouter = express.Router();
@@ -92,6 +92,23 @@ leadsRouter.get('/stats', async (req, res) => {
   }
 });
 
+// GET /api/leads/contractor-stats
+leadsRouter.get('/contractor-stats', async (req, res) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status='new') AS new_count,
+        COUNT(*) FILTER (WHERE status='contacted') AS contacted_count,
+        COUNT(*) FILTER (WHERE status='sold') AS sold_count,
+        COUNT(*) FILTER (WHERE status='no_follow_up') AS no_follow_up_count,
+        COALESCE(SUM(sale_amount) FILTER (WHERE status='sold'), 0) AS revenue
+      FROM leads WHERE bond_type = 'Texas Contractor License Bond'
+    `);
+    res.json(result.rows[0]);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/leads — list with filters
 leadsRouter.get('/', async (req, res) => {
   try {
@@ -144,10 +161,10 @@ leadsRouter.patch('/:id', async (req, res) => {
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     sets.push(`updated_at = NOW()`);
     vals.push(id);
-    const result = await db.execute(sql.raw(
+    const result = await pool.query(
       `UPDATE leads SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
       vals
-    ));
+    );
     if (!result.rows.length) return res.status(404).json({ error: 'not found' });
     res.json(result.rows[0]);
   } catch (err) {
