@@ -215,9 +215,9 @@ export default function Dealers() {
 
         {/* Header */}
         <div style={{padding:'24px 24px 16px',borderBottom:'1px solid var(--border)'}}>
-          <div style={{fontSize:10,fontFamily:'monospace',letterSpacing:4,color:'var(--gold)',marginBottom:4}}>LICENSE & PERMIT BONDS</div>
+          <div style={{fontSize:10,fontFamily:'monospace',letterSpacing:4,color:'var(--gold)',marginBottom:4}}>GDN / DEALER BONDS</div>
           <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:16}}>
-            <h1 style={{fontFamily:'"Bebas Neue",cursive',fontSize:36,letterSpacing:4,color:'white',margin:0}}>Auto Dealers</h1>
+            <h1 style={{fontFamily:'"Bebas Neue",cursive',fontSize:36,letterSpacing:4,color:'white',margin:0}}>GDN / Dealer Lookup</h1>
             {stats&&(
               <div style={{display:'flex',gap:24}}>
                 {[
