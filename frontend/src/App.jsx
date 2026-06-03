@@ -15,6 +15,7 @@ import UsersPage from './pages/Users.jsx';
 import AIPage from './pages/AI.jsx';
 import LeadsPage from './pages/Leads.jsx';
 import CallLogsPage from './pages/CallLogs.jsx';
+import FilingsPage from './pages/Filings.jsx';
 import {getToken,getUser,clearAuth} from './auth.js';
 import {Phone} from 'lucide-react';
 
@@ -44,6 +45,7 @@ const nav = [
   {to:'/tdlr',icon:FileText,label:'TDLR Registry',roles:['admin','sales','readonly']},
   {to:'/leads',icon:FileText,label:'Leads',roles:['admin','sales']},
   {to:'/calls',icon:Phone,label:'Call Logs',roles:['admin','sales']},
+  {to:'/filings',icon:FileText,label:'Filing Service',roles:['admin','sales']},
   {to:'/import',icon:Upload,label:'Import',roles:['admin']},
   {to:'/ai',icon:Sparkles,label:'AI Tools',roles:['admin','sales']},
   {to:'/users',icon:Shield,label:'Users',roles:['admin']},

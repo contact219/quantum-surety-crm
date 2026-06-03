@@ -18,6 +18,7 @@ import { contractorsRouter } from './routes/contractors.js';
 import { tdlrRouter } from './routes/tdlr.js';
 import { dealerCampaignsRouter } from './routes/dealer-campaigns.js';
 import { leadsRouter } from './routes/leads.js';
+import { filingsRouter } from './routes/filings.js';
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -37,6 +38,7 @@ app.use('/api/unsubscribe', unsubscribeRouter);
 app.use('/api/pipeline', pipelineRouter);
 app.use('/api/drip', dripRouter);
 app.use('/api/leads', leadsRouter);
+app.use('/api/filings', filingsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/auth', authRouter);
