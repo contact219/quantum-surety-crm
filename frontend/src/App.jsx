@@ -154,6 +154,7 @@ export default function App() {
             <Route path="/import" element={user.role==='admin'?<ImportPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
             <Route path="/ai" element={user.role!=='readonly'?<AIPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
             <Route path="/calls" element={user.role!=="readonly"?<CallLogsPage/>:<div style={{padding:32,color:"var(--text-dim)"}}>Access restricted</div>}/>
+            <Route path="/filings" element={user.role!=="readonly"?<FilingsPage/>:<div style={{padding:32,color:"var(--text-dim)"}}>Access restricted</div>}/>
             <Route path="/users" element={user.role==='admin'?<UsersPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
           </Routes>
         </main>
