@@ -10,10 +10,11 @@ const APP_URL = process.env.APP_URL || 'https://quantumsurety.bond';
 // Weekday gate — skip Saturday (6) and Sunday (0) unless DRIP_ALL_DAYS=true
 function isWeekday() {
   if (process.env.DRIP_ALL_DAYS === 'true') return true;
-  const day = new Date().getUTCDay(); // use UTC; server is CDT (UTC-5/6)
-  // Convert to CDT
-  const cdtHour = (new Date().getUTCHours() - 5 + 24) % 24;
-  const cdtDay  = cdtHour < 0 ? (day - 1 + 7) % 7 : day;
+  const now = new Date();
+  const utcDay  = now.getUTCDay();
+  const utcHour = now.getUTCHours();
+  // CDT = UTC-5; hours 0-4 UTC are still the previous CDT day
+  const cdtDay = utcHour < 5 ? (utcDay + 6) % 7 : utcDay;
   return cdtDay !== 0 && cdtDay !== 6;
 }
 
@@ -27,7 +28,8 @@ function interpolate(template, vars) {
     .replace(/{{license_type}}/g,    vars.license_type || '')
     .replace(/{{city}}/g,            vars.city || '')
     .replace(/{{county}}/g,          vars.county || '')
-    .replace(/{{unsubscribe_url}}/g, vars.unsubscribe_url || '');
+    .replace(/{{unsubscribe_url}}/g, vars.unsubscribe_url || '')
+    .replace(/{{verify_url}}/g,       vars.verify_url || '');
 }
 
 dripRouter.get('/', async (req, res) => {
@@ -73,11 +75,26 @@ dripRouter.post('/run', async (req, res) => {
     return res.json({ ok: true, skipped: 'weekend', total_sent: 0 });
   }
 
+  const DAILY_MAX = parseInt(process.env.DRIP_DAILY_MAX || '5000');
+
   try {
+    const capCheck = await db.execute(sql`
+      SELECT
+        (SELECT COUNT(*) FROM notary_campaign_sends WHERE sent_at >= CURRENT_DATE) +
+        (SELECT COUNT(*) FROM dealer_campaign_sends  WHERE sent_at >= CURRENT_DATE) AS total_today
+    `);
+    const totalToday = parseInt(capCheck.rows[0]?.total_today || 0);
+    if (totalToday >= DAILY_MAX) {
+      console.log('[drip/run] Daily cap reached (' + totalToday + '/' + DAILY_MAX + ') -- skipping run.');
+      return res.json({ ok: true, skipped: 'daily_cap_reached', total_today: totalToday, total_sent: 0 });
+    }
+
     const schedules = await db.execute(sql`SELECT * FROM drip_schedules WHERE status = 'active'`);
     let totalSent = 0;
+    let quotaExceeded = false;
 
     for (const schedule of schedules.rows) {
+      if (quotaExceeded) break;
       const filters = schedule.filters || {};
       // emails_per_day split across 4 cron runs
       const limit = Math.ceil((schedule.emails_per_day || 100) / 4);
@@ -98,7 +115,7 @@ dripRouter.post('/run', async (req, res) => {
                          : filters.expiring === 'expired' ? sql`AND expire_date < CURRENT_DATE`
                          : sql``;
         const result = await db.execute(sql`
-          SELECT id, first_name, last_name, email, expire_date, surety_company FROM notaries
+          SELECT id, notary_id, first_name, last_name, email, expire_date, surety_company FROM notaries
           WHERE email != '' AND email IS NOT NULL
           AND email NOT IN (SELECT email FROM unsubscribes)
           AND email NOT IN (
@@ -108,6 +125,7 @@ dripRouter.post('/run', async (req, res) => {
             AND sent_at > NOW() - INTERVAL '60 days'
           )
           ${suretyCond} ${cityCond} ${expCond}
+          AND email NOT IN (SELECT email FROM notary_campaign_sends WHERE sent_at >= CURRENT_DATE)
           ORDER BY expire_date ASC LIMIT ${limit}
         `);
         contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
@@ -164,6 +182,7 @@ dripRouter.post('/run', async (req, res) => {
             AND sent_at > NOW() - INTERVAL '60 days'
           )
           ${cityCond} ${countyCond} ${typeCond} ${expCond}
+          AND id NOT IN (SELECT dealer_id FROM dealer_campaign_sends WHERE sent_at >= CURRENT_DATE)
           ORDER BY license_expiration ASC LIMIT ${limit}
         `);
         contacts = result.rows.map(r => ({
@@ -210,7 +229,7 @@ dripRouter.post('/run', async (req, res) => {
         const cityPct  = filters.city ? `%${filters.city}%` : null;
         const cityCond = cityPct ? sql`AND city ILIKE ${cityPct}` : sql``;
         const result = await db.execute(sql`
-          SELECT id, first_name, last_name, email, expire_date, surety_company FROM notaries
+          SELECT id, notary_id, first_name, last_name, email, expire_date, surety_company FROM notaries
           WHERE email != '' AND email IS NOT NULL
           AND expire_date < CURRENT_DATE
           AND expire_date > CURRENT_DATE - INTERVAL '2 years'
@@ -222,6 +241,7 @@ dripRouter.post('/run', async (req, res) => {
             AND sent_at > NOW() - INTERVAL '60 days'
           )
           ${cityCond}
+          AND email NOT IN (SELECT email FROM notary_campaign_sends WHERE sent_at >= CURRENT_DATE)
           ORDER BY expire_date DESC LIMIT ${limit}
         `);
         contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
@@ -277,6 +297,7 @@ dripRouter.post('/run', async (req, res) => {
       let sent = 0;
       for (const c of contacts) {
         if (!c.email) continue;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) continue;
 
         const expDate      = c.expire_date ? new Date(c.expire_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
         const unsubUrl     = `${APP_URL}/api/unsubscribe?email=${encodeURIComponent(c.email)}`;
@@ -290,12 +311,13 @@ dripRouter.post('/run', async (req, res) => {
           city:           c.city || '',
           county:         c.county || '',
           unsubscribe_url: unsubUrl,
+          verify_url: c.notary_id ? 'https://verify.quantumsurety.bond/verify/notary/' + c.notary_id : '',
         };
 
         const rawHtml = interpolate(schedule.body, vars);
         const subj = interpolate(schedule.subject, vars);
         const pixelUrl = `https://crm-api.permitpilot.online/api/tracking/open?drip=${schedule.id}&e=${encodeURIComponent(c.email)}&t=${encodeURIComponent(c._type)}`;
-        const linkedHtml = rawHtml.replace(/href="(https?:\/\/quantumsurety\.bond[^"]*)"/g, (m, u) => {
+        const linkedHtml = rawHtml.replace(/href="(https?:\/\/(?:[a-z0-9-]+\.)?quantumsurety\.bond[^"]*)"/g, (m, u) => {
           if (u.includes('/unsubscribe') || u.includes('/api/tracking/')) return m;
           const tracked = `https://crm-api.permitpilot.online/api/tracking/click?drip=${schedule.id}&e=${encodeURIComponent(c.email)}&t=${encodeURIComponent(c._type)}&url=${encodeURIComponent(u)}`;
           return `href="${tracked}"`;
@@ -338,7 +360,8 @@ dripRouter.post('/run', async (req, res) => {
           const msg = e.message || '';
           const code = e.Code || e.code || '';
           if (/Throttling|throttl|rate.exceed|too many/i.test(msg + code)) {
-            console.error('Drip rate limited by SES — stopping this run.');
+            console.error('Drip rate limited by SES -- aborting entire run.');
+            quotaExceeded = true;
             break;
           }
           console.error('Drip send error:', msg);
@@ -358,6 +381,7 @@ dripRouter.post('/run', async (req, res) => {
 
 // Daily alert — notaries expiring in 30 days
 dripRouter.post('/alert', async (req, res) => {
+  if (!isWeekday()) return res.json({ ok: true, skipped: 'weekend' });
   const { to_email = 'administrator@quantumsurety.bond' } = req.body;
   try {
     const result = await db.execute(sql`
