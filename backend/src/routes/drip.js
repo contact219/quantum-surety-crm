@@ -81,7 +81,8 @@ dripRouter.post('/run', async (req, res) => {
     const capCheck = await db.execute(sql`
       SELECT
         (SELECT COUNT(*) FROM notary_campaign_sends WHERE sent_at >= CURRENT_DATE) +
-        (SELECT COUNT(*) FROM dealer_campaign_sends  WHERE sent_at >= CURRENT_DATE) AS total_today
+        (SELECT COUNT(*) FROM dealer_campaign_sends  WHERE sent_at >= CURRENT_DATE) +
+        (SELECT COUNT(*) FROM email_events WHERE contact_type = 'contractor' AND event_type = 'email.sent' AND created_at >= CURRENT_DATE) AS total_today
     `);
     const totalToday = parseInt(capCheck.rows[0]?.total_today || 0);
     if (totalToday >= DAILY_MAX) {
