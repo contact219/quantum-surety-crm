@@ -89,7 +89,7 @@ dripRouter.post('/run', async (req, res) => {
       return res.json({ ok: true, skipped: 'daily_cap_reached', total_today: totalToday, total_sent: 0 });
     }
 
-    const schedules = await db.execute(sql`SELECT * FROM drip_schedules WHERE status = 'active'`);
+    const schedules = await db.execute(sql`SELECT * FROM drip_schedules WHERE status = 'active' ORDER BY emails_per_day DESC`);
     let totalSent = 0;
     let quotaExceeded = false;
 
