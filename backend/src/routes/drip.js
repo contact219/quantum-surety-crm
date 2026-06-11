@@ -149,6 +149,11 @@ dripRouter.post('/run', async (req, res) => {
             WHERE drip_id = ${schedule.id}
             AND campaign_name LIKE 'FOLLOW-UP:%' AND status = 'sent'
           )
+          AND n.email NOT IN (
+            SELECT contact_email FROM email_events
+            WHERE event_type = 'email.opened'
+            AND created_at > NOW() - INTERVAL '14 days'
+          )
           AND n.expire_date >= CURRENT_DATE
           ORDER BY n.email, n.expire_date ASC
           LIMIT ${limit}
@@ -212,6 +217,11 @@ dripRouter.post('/run', async (req, res) => {
             SELECT email FROM dealer_campaign_sends
             WHERE drip_id = ${schedule.id}
             AND campaign_name LIKE 'FOLLOW-UP:%' AND status = 'sent'
+          )
+          AND d.email NOT IN (
+            SELECT contact_email FROM email_events
+            WHERE event_type = 'email.opened'
+            AND created_at > NOW() - INTERVAL '14 days'
           )
           AND d.license_expiration >= CURRENT_DATE
           ORDER BY d.email, d.license_expiration ASC
@@ -318,7 +328,7 @@ dripRouter.post('/run', async (req, res) => {
         const rawHtml = interpolate(schedule.body, vars);
         const subj = interpolate(schedule.subject, vars);
         const pixelUrl = `https://crm-api.permitpilot.online/api/tracking/open?drip=${schedule.id}&e=${encodeURIComponent(c.email)}&t=${encodeURIComponent(c._type)}`;
-        const linkedHtml = rawHtml.replace(/href="(https?:\/\/(?:[a-z0-9-]+\.)?quantumsurety\.bond[^"]*)"/g, (m, u) => {
+        const linkedHtml = rawHtml.replace(/href="(https?:\/\/[^"]+)"/g, (m, u) => {
           if (u.includes('/unsubscribe') || u.includes('/api/tracking/')) return m;
           const tracked = `https://crm-api.permitpilot.online/api/tracking/click?drip=${schedule.id}&e=${encodeURIComponent(c.email)}&t=${encodeURIComponent(c._type)}&url=${encodeURIComponent(u)}`;
           return `href="${tracked}"`;
@@ -521,6 +531,10 @@ dripRouter.post('/auto-pipeline', async (req, res) => {
 // ── CAMPAIGN ANALYTICS ────────────────────────────────────────────────────────
 
 dripRouter.get('/analytics', async (req, res) => {
+  const providedKey = req.headers['x-api-key'] || req.query.key;
+  if (!process.env.ANALYTICS_API_KEY || providedKey !== process.env.ANALYTICS_API_KEY) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
   try {
     const result = await db.execute(sql`
       SELECT
