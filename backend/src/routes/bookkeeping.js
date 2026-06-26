@@ -760,3 +760,152 @@ bookkeepingRouter.get('/pl', async (req, res) => {
     res.json({ revenue, total_expenses, revenue_by_type: revRows, expenses_by_category: expRows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ─── RECURRING EXPENSES ────────────────────────────────────────────────────
+bookkeepingRouter.get('/expenses/recurring', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT r.*, c.name AS category_name FROM bk_recurring_expenses r LEFT JOIN bk_expense_categories c ON c.id=r.category_id ORDER BY r.next_due`);
+    res.json(rows);
+  } catch(e){ res.status(500).json({error:e.message}); }
+});
+bookkeepingRouter.post('/expenses/recurring', async (req, res) => {
+  const { category_id, vendor, description, amount, frequency, start_date, payment_method, notes } = req.body;
+  if (!vendor||!amount||!frequency) return res.status(400).json({error:'vendor, amount, frequency required'});
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO bk_recurring_expenses (category_id,vendor,description,amount,frequency,start_date,next_due,payment_method,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8) RETURNING *`,
+      [category_id||null,vendor,description||'',amount,frequency,start_date||new Date().toISOString().slice(0,10),payment_method||'card',notes||'']
+    );
+    res.json(rows[0]);
+  } catch(e){ res.status(500).json({error:e.message}); }
+});
+bookkeepingRouter.delete('/expenses/recurring/:id', async (req, res) => {
+  try { await pool.query('DELETE FROM bk_recurring_expenses WHERE id=$1',[req.params.id]); res.json({ok:true}); }
+  catch(e){ res.status(500).json({error:e.message}); }
+});
+bookkeepingRouter.post('/expenses/recurring/:id/run', async (req, res) => {
+  try {
+    const { rows:rr } = await pool.query('SELECT * FROM bk_recurring_expenses WHERE id=$1',[req.params.id]);
+    if (!rr.length) return res.status(404).json({error:'not found'});
+    const r = rr[0];
+    const { rows:exp } = await pool.query(
+      `INSERT INTO bk_expenses (category_id,vendor,description,amount,expense_date,payment_method,notes)
+       VALUES ($1,$2,$3,$4,CURRENT_DATE,$5,$6) RETURNING *`,
+      [r.category_id,r.vendor,r.description,r.amount,r.payment_method,`Auto-created from recurring: ${r.notes||''}`]
+    );
+    // advance next_due
+    const freq = r.frequency;
+    const interval = freq==='weekly'?'7 days':freq==='monthly'?'1 month':freq==='quarterly'?'3 months':'1 year';
+    await pool.query(`UPDATE bk_recurring_expenses SET next_due=next_due+INTERVAL '${interval}', run_count=run_count+1, last_run=CURRENT_DATE WHERE id=$1`,[r.id]);
+    res.json({ok:true,expense:exp[0]});
+  } catch(e){ res.status(500).json({error:e.message}); }
+});
+
+// ─── 1099 VENDOR TRACKER ───────────────────────────────────────────────────
+bookkeepingRouter.get('/vendors/1099', async (req, res) => {
+  const year = req.query.year || new Date().getFullYear();
+  try {
+    const { rows } = await pool.query(`
+      SELECT vendor,
+        SUM(amount) AS total_paid,
+        COUNT(*) AS payment_count,
+        MIN(expense_date) AS first_payment,
+        MAX(expense_date) AS last_payment,
+        CASE WHEN SUM(amount) >= 600 THEN true ELSE false END AS needs_1099
+      FROM bk_expenses
+      WHERE EXTRACT(YEAR FROM expense_date) = $1
+      GROUP BY vendor
+      ORDER BY total_paid DESC
+    `, [year]);
+    const vendors1099 = rows.filter(r=>parseFloat(r.total_paid)>=600);
+    res.json({ year, all_vendors: rows, vendors_1099: vendors1099, total_1099_count: vendors1099.length });
+  } catch(e){ res.status(500).json({error:e.message}); }
+});
+
+// ─── BUDGET VS ACTUAL ──────────────────────────────────────────────────────
+bookkeepingRouter.get('/budgets', async (req, res) => {
+  const month = req.query.month || new Date().toISOString().slice(0,7);
+  try {
+    const { rows:budgets } = await pool.query(`SELECT b.*, c.name AS category_name FROM bk_budgets b JOIN bk_expense_categories c ON c.id=b.category_id WHERE b.month=$1 ORDER BY c.name`,[month]);
+    const { rows:actuals } = await pool.query(`
+      SELECT COALESCE(pc.id,c.id) AS category_id, SUM(e.amount) AS actual
+      FROM bk_expenses e
+      LEFT JOIN bk_expense_categories c ON c.id=e.category_id
+      LEFT JOIN bk_expense_categories pc ON pc.id=c.parent_id
+      WHERE to_char(e.expense_date,'YYYY-MM')=$1
+      GROUP BY 1
+    `,[month]);
+    const actMap = Object.fromEntries(actuals.map(a=>[a.category_id,parseFloat(a.actual)]));
+    const result = budgets.map(b=>({...b,actual:actMap[b.category_id]||0,variance:(actMap[b.category_id]||0)-parseFloat(b.budget_amount)}));
+    res.json({month,budgets:result});
+  } catch(e){ res.status(500).json({error:e.message}); }
+});
+bookkeepingRouter.post('/budgets', async (req, res) => {
+  const { category_id, month, budget_amount } = req.body;
+  if (!category_id||!month||!budget_amount) return res.status(400).json({error:'category_id, month, budget_amount required'});
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO bk_budgets (category_id,month,budget_amount) VALUES ($1,$2,$3)
+       ON CONFLICT (category_id,month) DO UPDATE SET budget_amount=$3 RETURNING *`,
+      [category_id,month,budget_amount]
+    );
+    res.json(rows[0]);
+  } catch(e){ res.status(500).json({error:e.message}); }
+});
+bookkeepingRouter.delete('/budgets/:id', async (req, res) => {
+  try { await pool.query('DELETE FROM bk_budgets WHERE id=$1',[req.params.id]); res.json({ok:true}); }
+  catch(e){ res.status(500).json({error:e.message}); }
+});
+
+// ─── YEAR-END TAX PACKET ───────────────────────────────────────────────────
+bookkeepingRouter.get('/export/tax-packet', async (req, res) => {
+  const year = req.query.year || new Date().getFullYear();
+  try {
+    const [bonds, expenses, vendors1099, summary] = await Promise.all([
+      pool.query(`SELECT bond_number,insured_name,bond_type,premium,commission_rate,commission_amt,carrier_remit_amt,effective_date,status FROM bk_bonds WHERE EXTRACT(YEAR FROM effective_date)=$1 AND status='issued' ORDER BY effective_date`,[year]),
+      pool.query(`SELECT e.expense_date,e.vendor,e.description,e.amount,c.name AS category,COALESCE(c.deductible_pct,100) AS deductible_pct,ROUND(e.amount*COALESCE(c.deductible_pct,100)/100,2) AS deductible_amt FROM bk_expenses e LEFT JOIN bk_expense_categories c ON c.id=e.category_id WHERE EXTRACT(YEAR FROM e.expense_date)=$1 ORDER BY e.expense_date`,[year]),
+      pool.query(`SELECT vendor,SUM(amount) AS total FROM bk_expenses WHERE EXTRACT(YEAR FROM expense_date)=$1 GROUP BY vendor HAVING SUM(amount)>=600 ORDER BY total DESC`,[year]),
+      pool.query(`SELECT SUM(premium) AS total_premium,SUM(commission_amt) AS total_commission,SUM(carrier_remit_amt) AS total_remitted,COUNT(*) AS bond_count FROM bk_bonds WHERE EXTRACT(YEAR FROM effective_date)=$1 AND status='issued'`,[year]),
+    ]);
+    const totalExp = expenses.rows.reduce((s,r)=>s+parseFloat(r.amount),0);
+    const totalDed = expenses.rows.reduce((s,r)=>s+parseFloat(r.deductible_amt),0);
+    const rev = parseFloat(summary.rows[0]?.total_commission||0);
+    const netIncome = rev - totalDed;
+
+    const csv = (rows,cols) => [cols.join(','),...rows.map(r=>cols.map(c=>{const v=r[c]??'';return String(v).includes(',')?`"${v}"`:v;}).join(','))].join('\n');
+    const sep = '\n\n';
+    const out = [
+      `QUANTUM SURETY LLC — TAX PACKET ${year}`,
+      `Generated: ${new Date().toISOString().slice(0,10)}`,
+      '',
+      `INCOME SUMMARY`,
+      `Total Premiums Written,$${parseFloat(summary.rows[0]?.total_premium||0).toFixed(2)}`,
+      `Commission Revenue,$${rev.toFixed(2)}`,
+      `Carrier Remittances,$${parseFloat(summary.rows[0]?.total_remitted||0).toFixed(2)}`,
+      `Bonds Issued,${summary.rows[0]?.bond_count||0}`,
+      '',
+      `EXPENSE SUMMARY`,
+      `Total Expenses,$${totalExp.toFixed(2)}`,
+      `Deductible Amount,$${totalDed.toFixed(2)}`,
+      `Net Income (Revenue - Deductible Expenses),$${netIncome.toFixed(2)}`,
+      '',
+      `SE TAX ESTIMATE`,
+      `SE Tax Base (92.35% of net),$${(netIncome*0.9235).toFixed(2)}`,
+      `SE Tax (15.3%),$${(netIncome*0.9235*0.153).toFixed(2)}`,
+      '',
+      '--- BOND DETAIL ---',
+      csv(bonds.rows,['bond_number','insured_name','bond_type','premium','commission_amt','carrier_remit_amt','effective_date']),
+      '',
+      '--- EXPENSE DETAIL ---',
+      csv(expenses.rows,['expense_date','vendor','description','amount','category','deductible_pct','deductible_amt']),
+      '',
+      '--- 1099 VENDORS (paid $600+) ---',
+      csv(vendors1099.rows,['vendor','total']),
+    ].join('\n');
+
+    res.setHeader('Content-Type','text/csv');
+    res.setHeader('Content-Disposition',`attachment; filename="quantum_surety_tax_packet_${year}.csv"`);
+    res.send(out);
+  } catch(e){ res.status(500).json({error:e.message}); }
+});

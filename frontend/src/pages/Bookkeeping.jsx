@@ -1792,8 +1792,245 @@ function TaxTab() {
   );
 }
 
+function RecurringTab() {
+  const [items, setItems] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ category_id:'', vendor:'', description:'', amount:'', frequency:'monthly', start_date: new Date().toISOString().slice(0,10), payment_method:'card', notes:'' });
+  const [running, setRunning] = useState(null);
+  const load = () => {
+    fetch(`${API}/expenses/recurring`).then(r=>r.json()).then(setItems).catch(()=>{});
+    fetch(`${API}/categories`).then(r=>r.json()).then(setCategories).catch(()=>{});
+  };
+  useEffect(()=>{ load(); },[]);
+  const save = async () => {
+    await fetch(`${API}/expenses/recurring`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)});
+    setShowAdd(false); load();
+  };
+  const del = async (id) => { if(!confirm('Delete this recurring expense?')) return; await fetch(`${API}/expenses/recurring/${id}`,{method:'DELETE'}); load(); };
+  const runNow = async (id) => {
+    setRunning(id);
+    const r = await fetch(`${API}/expenses/recurring/${id}/run`,{method:'POST'});
+    const d = await r.json();
+    setRunning(null);
+    if(d.ok) { alert('Expense created: $' + parseFloat(d.expense?.amount||0).toFixed(2)); load(); }
+    else alert(d.error||'Error');
+  };
+  const FREQ_COLORS = {weekly:'#f59e0b',monthly:'#6366f1',quarterly:'#22c55e',annual:'#C9A84C'};
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div style={{fontSize:13,color:'var(--text-dim)'}}>Auto-create expenses on a schedule — subscriptions, insurance, rent</div>
+        <Btn onClick={()=>setShowAdd(true)}>+ Add Recurring</Btn>
+      </div>
+      <Card>
+        {items.length===0 && <div style={{color:'var(--text-dim)',fontSize:13,textAlign:'center',padding:32}}>No recurring expenses yet</div>}
+        {items.map(it=>(
+          <div key={it.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',borderBottom:'1px solid var(--border)'}}>
+            <div>
+              <div style={{fontWeight:600,fontSize:14,color:'white'}}>{it.vendor}</div>
+              <div style={{fontSize:12,color:'var(--text-dim)'}}>{it.description} · {it.category_name||'Uncategorized'}</div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginTop:2}}>Next due: {it.next_due?.slice(0,10)} · Run {it.run_count}x</div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:13,fontWeight:700,color:'#22c55e'}}>${parseFloat(it.amount).toFixed(2)}</span>
+              <Badge label={it.frequency} color={FREQ_COLORS[it.frequency]||'#6B6B8A'} />
+              <Btn onClick={()=>runNow(it.id)} disabled={running===it.id} style={{fontSize:11,padding:'4px 10px'}}>{running===it.id?'Running...':'Run Now'}</Btn>
+              <Btn variant="ghost" onClick={()=>del(it.id)} style={{fontSize:11,padding:'4px 8px',color:'#ef4444'}}>Delete</Btn>
+            </div>
+          </div>
+        ))}
+      </Card>
+      {showAdd && (
+        <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.85)'}}>
+          <div style={{width:'100%',maxWidth:460,borderRadius:16,border:'1px solid var(--border)',background:'var(--surface)',padding:24}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+              <div style={{fontFamily:'"Bebas Neue",cursive',fontSize:24,letterSpacing:3,color:'white'}}>Add Recurring Expense</div>
+              <button onClick={()=>setShowAdd(false)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-dim)',fontSize:20}}>x</button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+              <FInput label="Vendor" value={form.vendor} onChange={e=>setForm(f=>({...f,vendor:e.target.value}))} />
+              <FInput label="Amount ($)" type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} />
+              <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                <label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:4}}>Description</label>
+                <input value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}
+                  style={{width:'100%',background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'white',fontSize:14,boxSizing:'border-box'}} />
+              </div>
+              <div style={{marginBottom:14}}>
+                <label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:4}}>Frequency</label>
+                <select value={form.frequency} onChange={e=>setForm(f=>({...f,frequency:e.target.value}))}
+                  style={{width:'100%',background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'white',fontSize:14}}>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="annual">Annual</option>
+                </select>
+              </div>
+              <FInput label="Start Date" type="date" value={form.start_date} onChange={e=>setForm(f=>({...f,start_date:e.target.value}))} />
+              <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                <label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:4}}>Category</label>
+                <select value={form.category_id} onChange={e=>setForm(f=>({...f,category_id:e.target.value}))}
+                  style={{width:'100%',background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'white',fontSize:14}}>
+                  <option value="">-- Select --</option>
+                  {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{display:'flex',gap:12,justifyContent:'flex-end',marginTop:8}}>
+              <Btn variant="ghost" onClick={()=>setShowAdd(false)}>Cancel</Btn>
+              <Btn onClick={save} disabled={!form.vendor||!form.amount}>Save</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BudgetTab() {
+  const [month, setMonth] = useState(new Date().toISOString().slice(0,7));
+  const [data, setData] = useState({budgets:[]});
+  const [categories, setCategories] = useState([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({category_id:'',budget_amount:''});
+  const load = () => {
+    fetch(`${API}/budgets?month=${month}`).then(r=>r.json()).then(setData).catch(()=>{});
+    fetch(`${API}/categories`).then(r=>r.json()).then(setCategories).catch(()=>{});
+  };
+  useEffect(()=>{ load(); },[month]);
+  const save = async () => {
+    await fetch(`${API}/budgets`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...form,month})});
+    setShowAdd(false); setForm({category_id:'',budget_amount:''}); load();
+  };
+  const del = async (id) => { await fetch(`${API}/budgets/${id}`,{method:'DELETE'}); load(); };
+  const totalBudget = data.budgets.reduce((s,b)=>s+parseFloat(b.budget_amount||0),0);
+  const totalActual = data.budgets.reduce((s,b)=>s+parseFloat(b.actual||0),0);
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
+          style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',color:'white',fontSize:13}} />
+        <Btn onClick={()=>setShowAdd(true)}>+ Set Budget</Btn>
+      </div>
+      {data.budgets.length===0 ? (
+        <Card><div style={{color:'var(--text-dim)',fontSize:13,textAlign:'center',padding:32}}>No budgets set for {month}. Click "Set Budget" to add category targets.</div></Card>
+      ) : (
+        <Card>
+          {data.budgets.map(b=>{
+            const pct = b.budget_amount>0 ? Math.min(100,(parseFloat(b.actual||0)/parseFloat(b.budget_amount))*100) : 0;
+            const over = parseFloat(b.actual||0) > parseFloat(b.budget_amount);
+            return (
+              <div key={b.id} style={{marginBottom:16}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                  <span style={{fontSize:13,color:'white',fontWeight:500}}>{b.category_name}</span>
+                  <div style={{display:'flex',gap:16,alignItems:'center'}}>
+                    <span style={{fontSize:12,color:'var(--text-dim)'}}>Budget: ${parseFloat(b.budget_amount).toFixed(2)}</span>
+                    <span style={{fontSize:13,color:'white'}}>Actual: ${parseFloat(b.actual||0).toFixed(2)}</span>
+                    <span style={{fontSize:13,fontWeight:600,color:over?'#ef4444':'#22c55e'}}>{over?'+':''}{(parseFloat(b.actual||0)-parseFloat(b.budget_amount)).toFixed(2)}</span>
+                    <button onClick={()=>del(b.id)} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:16}}>x</button>
+                  </div>
+                </div>
+                <div style={{background:'var(--muted)',borderRadius:4,height:6,overflow:'hidden'}}>
+                  <div style={{height:'100%',width:pct+'%',background:over?'#ef4444':'#6366f1',borderRadius:4}}/>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{borderTop:'1px solid var(--border)',paddingTop:12,display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:600}}>
+            <span>Total</span>
+            <span style={{color:totalActual>totalBudget?'#ef4444':'#22c55e'}}>${totalActual.toFixed(2)} / ${totalBudget.toFixed(2)}</span>
+          </div>
+        </Card>
+      )}
+      {showAdd && (
+        <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.85)'}}>
+          <div style={{width:'100%',maxWidth:360,borderRadius:16,border:'1px solid var(--border)',background:'var(--surface)',padding:24}}>
+            <div style={{fontFamily:'"Bebas Neue",cursive',fontSize:22,letterSpacing:3,color:'white',marginBottom:16}}>Set Budget — {month}</div>
+            <div style={{display:'flex',flexDirection:'column',gap:12}}>
+              <div>
+                <label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:4}}>Category</label>
+                <select value={form.category_id} onChange={e=>setForm(f=>({...f,category_id:e.target.value}))}
+                  style={{width:'100%',background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'white',fontSize:14}}>
+                  <option value="">-- Select --</option>
+                  {categories.filter(c=>!c.parent_id).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <FInput label="Monthly Budget ($)" type="number" value={form.budget_amount} onChange={e=>setForm(f=>({...f,budget_amount:e.target.value}))} />
+            </div>
+            <div style={{display:'flex',gap:12,justifyContent:'flex-end',marginTop:16}}>
+              <Btn variant="ghost" onClick={()=>setShowAdd(false)}>Cancel</Btn>
+              <Btn onClick={save} disabled={!form.category_id||!form.budget_amount}>Save</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Tab1099() {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [data, setData] = useState(null);
+  const load = () => fetch(`${API}/vendors/1099?year=${year}`).then(r=>r.json()).then(setData).catch(()=>{});
+  useEffect(()=>{ load(); },[year]);
+  const downloadPacket = () => window.location.assign(`${API}/export/tax-packet?year=${year}`);
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <div style={{fontSize:13,color:'var(--text-dim)'}}>Vendors paid $600+ require a 1099-NEC</div>
+          <select value={year} onChange={e=>setYear(Number(e.target.value))}
+            style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'4px 10px',color:'white',fontSize:13}}>
+            {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <Btn onClick={downloadPacket}>Download Tax Packet CSV</Btn>
+      </div>
+      {data && (
+        <div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}}>
+            <Card><div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>1099 VENDORS</div><div style={{fontSize:28,fontWeight:700,color:'#C9A84C'}}>{data.total_1099_count}</div></Card>
+            <Card><div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>ALL VENDORS</div><div style={{fontSize:28,fontWeight:700,color:'white'}}>{data.all_vendors?.length||0}</div></Card>
+            <Card><div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>TOTAL PAID</div><div style={{fontSize:24,fontWeight:700,color:'#22c55e'}}>${(data.all_vendors||[]).reduce((s,v)=>s+parseFloat(v.total_paid||0),0).toFixed(2)}</div></Card>
+          </div>
+          {data.vendors_1099?.length > 0 ? (
+            <Card style={{marginBottom:16}}>
+              <div style={{fontSize:11,color:'#C9A84C',fontFamily:'monospace',letterSpacing:2,marginBottom:12}}>REQUIRES 1099-NEC (paid $600+)</div>
+              {data.vendors_1099.map((v,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+                  <div>
+                    <div style={{color:'white',fontWeight:500}}>{v.vendor}</div>
+                    <div style={{fontSize:12,color:'var(--text-dim)'}}>{v.payment_count} payments · {v.first_payment?.slice(0,10)} to {v.last_payment?.slice(0,10)}</div>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:12}}>
+                    <span style={{fontSize:15,fontWeight:700,color:'#22c55e'}}>${parseFloat(v.total_paid).toFixed(2)}</span>
+                    <Badge label="1099-NEC" color="#C9A84C" />
+                  </div>
+                </div>
+              ))}
+            </Card>
+          ) : (
+            <Card style={{marginBottom:16}}><div style={{color:'var(--text-dim)',fontSize:13,textAlign:'center',padding:24}}>No vendors reached the $600 threshold in {year}</div></Card>
+          )}
+          {(data.all_vendors||[]).filter(v=>parseFloat(v.total_paid)<600).length > 0 && (
+            <Card>
+              <div style={{fontSize:11,color:'var(--text-dim)',fontFamily:'monospace',letterSpacing:2,marginBottom:12}}>BELOW $600 THRESHOLD</div>
+              {data.all_vendors.filter(v=>parseFloat(v.total_paid)<600).map((v,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid var(--border)',fontSize:13}}>
+                  <span style={{color:'var(--text-dim)'}}>{v.vendor}</span>
+                  <span style={{color:'white'}}>${parseFloat(v.total_paid).toFixed(2)}</span>
+                </div>
+              ))}
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Bookkeeping() {
-  const TABS = ['Dashboard','Bonds','Payments','Trust Account','Remittances','Carriers','Expenses','Bills','P&L','Tax','Reports','Alerts'];
+  const TABS = ['Dashboard','Bonds','Payments','Trust Account','Remittances','Carriers','Expenses','Recurring','Bills','Budget','P&L','Tax','1099','Reports','Alerts'];
   const [tab, setTab] = useState('Dashboard');
   const [carriers, setCarriers] = useState([]);
 
@@ -1833,6 +2070,9 @@ export default function Bookkeeping() {
       {tab==='Tax'           && <TaxTab />}
       {tab==='Reports'       && <ReportsTab />}
       {tab==='Alerts'        && <AlertsTab />}
+      {tab==='Recurring'     && <RecurringTab />}
+      {tab==='Budget'        && <BudgetTab />}
+      {tab==='1099'          && <Tab1099 />}
     </div>
   );
 }

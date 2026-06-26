@@ -37,22 +37,22 @@ function loadGA4() {
 }
 
 const nav = [
-  {to:'/',icon:LayoutDashboard,label:'Dashboard',roles:['admin','sales','readonly']},
-  {to:'/contacts',icon:Users,label:'Contacts',roles:['admin','sales','readonly']},
-  {to:'/campaigns',icon:Mail,label:'Campaigns',roles:['admin','sales']},
-  {to:'/notaries',icon:FileText,label:'Notary Bonds',roles:['admin','sales','readonly']},
-  {to:'/dealers',icon:Car,label:'GDN / Dealer',roles:['admin','sales','readonly']},
-  {to:'/contractors',icon:FileText,label:'Contractor Bonds',roles:['admin','sales','readonly']},
-  {to:'/contractor-licenses',icon:FileText,label:'License Lookup',roles:['admin','sales','readonly']},
-  {to:'/tdlr',icon:FileText,label:'TDLR Registry',roles:['admin','sales','readonly']},
-  {to:'/leads',icon:FileText,label:'Leads',roles:['admin','sales']},
-  {to:'/calls',icon:Phone,label:'Call Logs',roles:['admin','sales']},
-  {to:'/filings',icon:FileText,label:'Filing Service',roles:['admin','sales']},
+  {to:'/',icon:LayoutDashboard,label:'Dashboard',roles:['admin','sales','readonly','accountant','bookkeeper']},
+  {to:'/contacts',icon:Users,label:'Contacts',roles:['admin','sales','readonly','accountant','bookkeeper']},
+  {to:'/campaigns',icon:Mail,label:'Campaigns',roles:['admin','sales','accountant','bookkeeper']},
+  {to:'/notaries',icon:FileText,label:'Notary Bonds',roles:['admin','sales','readonly','accountant','bookkeeper']},
+  {to:'/dealers',icon:Car,label:'GDN / Dealer',roles:['admin','sales','readonly','accountant','bookkeeper']},
+  {to:'/contractors',icon:FileText,label:'Contractor Bonds',roles:['admin','sales','readonly','accountant','bookkeeper']},
+  {to:'/contractor-licenses',icon:FileText,label:'License Lookup',roles:['admin','sales','readonly','accountant','bookkeeper']},
+  {to:'/tdlr',icon:FileText,label:'TDLR Registry',roles:['admin','sales','readonly','accountant','bookkeeper']},
+  {to:'/leads',icon:FileText,label:'Leads',roles:['admin','sales','accountant','bookkeeper']},
+  {to:'/calls',icon:Phone,label:'Call Logs',roles:['admin','sales','accountant','bookkeeper']},
+  {to:'/filings',icon:FileText,label:'Filing Service',roles:['admin','sales','accountant','bookkeeper']},
   {to:'/costs',icon:DollarSign,label:'Cost Tracker',roles:['admin']},
   {to:'/import',icon:Upload,label:'Import',roles:['admin']},
-  {to:'/ai',icon:Sparkles,label:'AI Tools',roles:['admin','sales']},
+  {to:'/ai',icon:Sparkles,label:'AI Tools',roles:['admin','sales','accountant','bookkeeper']},
   {to:'/users',icon:Shield,label:'Users',roles:['admin']},
-    {to:'/bookkeeping',icon:BookOpen,label:'Bookkeeping',roles:['admin']},
+    {to:'/bookkeeping',icon:BookOpen,label:'Bookkeeping',roles:['admin','bookkeeper','accountant']},
 ];
 
 export default function App() {
@@ -95,7 +95,7 @@ export default function App() {
       </nav>
       <div style={{padding:'12px 8px',borderTop:'1px solid var(--border)'}}>
         <div style={{padding:'8px 12px',fontSize:11,fontFamily:'monospace',color:'var(--text-dim)',marginBottom:4}}>
-          <span style={{color:user.role==='admin'?'var(--gold)':user.role==='sales'?'#4C9AC9':'#6B6B8A'}}>{user.role}</span> · {user.username}
+          <span style={{color:user.role==='admin'?'var(--gold)':user.role==='bookkeeper'?'#22c55e':user.role==='accountant'?'#a78bfa':user.role==='sales'?'#4C9AC9':'#6B6B8A'}}>{user.role}</span> · {user.username}
         </div>
         <button onClick={logout}
           style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'8px 12px',borderRadius:8,background:'none',border:'none',cursor:'pointer',color:'var(--text-dim)',fontSize:13}}>
@@ -161,7 +161,7 @@ export default function App() {
             <Route path="/filings" element={user.role!=="readonly"?<FilingsPage/>:<div style={{padding:32,color:"var(--text-dim)"}}>Access restricted</div>}/>
             <Route path="/costs" element={user.role==='admin'?<CostTracker/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
             <Route path="/users" element={user.role==='admin'?<UsersPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
-            <Route path="/bookkeeping" element={user.role==='admin'?<Bookkeeping/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
+            <Route path="/bookkeeping" element={['admin','bookkeeper','accountant'].includes(user.role)?<Bookkeeping/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
           </Routes>
         </main>
       </div>

@@ -2,7 +2,8 @@ import React,{useEffect,useState} from 'react';
 import {Plus,X,Shield,Eye,Edit2} from 'lucide-react';
 import {apiFetch} from '../auth.js';
 
-const ROLE_COLORS = {admin:'#C9A84C',sales:'#4C9AC9',readonly:'#6B6B8A'};
+const ROLE_COLORS = {admin:'#C9A84C',sales:'#4C9AC9',readonly:'#6B6B8A',accountant:'#a78bfa',bookkeeper:'#22c55e'};
+const ROLE_LABELS = {admin:'Admin',sales:'Normal User',readonly:'Read-only',accountant:'Accountant',bookkeeper:'Bookkeeper'};
 
 export default function Users() {
   const [users,setUsers]=useState([]);
@@ -119,7 +120,9 @@ export default function Users() {
                 <select value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}
                   style={{width:'100%',padding:'8px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--muted)',color:'var(--text)',fontSize:13,outline:'none'}}>
                   <option value="admin">Admin — full access</option>
-                  <option value="sales">Sales — can send campaigns</option>
+                  <option value="sales">Normal User — leads, campaigns, bonds</option>
+                  <option value="bookkeeper">Bookkeeper — full bookkeeping access</option>
+                  <option value="accountant">Accountant — bookkeeping read + exports</option>
                   <option value="readonly">Read-only — view only</option>
                 </select>
               </div>
