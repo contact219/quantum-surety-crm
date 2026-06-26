@@ -396,22 +396,20 @@ bookkeepingRouter.get('/dashboard', async (req, res) => {
     const [kpi, trustBal, recentBonds, trend, byCarrier] = await Promise.all([
       pool.query(`
         SELECT
-          COALESCE(SUM(CASE WHEN py.status='collected' AND to_char(py.collected_at,'YYYY-MM')=$1
-            THEN py.amount END), 0) as premiums_collected,
-          COALESCE(SUM(CASE WHEN py.status='collected' AND to_char(py.collected_at,'YYYY-MM')=$1
+          COALESCE(SUM(CASE WHEN to_char(b.effective_date,'YYYY-MM')=$1 AND b.status='issued'
+            THEN b.premium END), 0) as premiums_collected,
+          COALESCE(SUM(CASE WHEN to_char(b.effective_date,'YYYY-MM')=$1 AND b.status='issued'
             THEN b.commission_amt END), 0) as commission_earned,
           COALESCE((SELECT SUM(total_remitted) FROM bk_carrier_remittances
             WHERE status='sent' AND to_char(sent_at,'YYYY-MM')=$1), 0) as remittances_sent,
-          COUNT(DISTINCT CASE WHEN to_char(b.effective_date,'YYYY-MM')=$1 THEN b.id END) as bonds_issued,
+          COUNT(DISTINCT CASE WHEN to_char(b.effective_date,'YYYY-MM')=$1 AND b.status='issued' THEN b.id END) as bonds_issued,
           COUNT(DISTINCT CASE WHEN b.status='issued'
-            AND NOT EXISTS (SELECT 1 FROM bk_bond_payments p2 WHERE p2.bond_id=b.id AND p2.status='collected')
-            AND b.effective_date < NOW() - INTERVAL '30 days' THEN b.id END) as overdue_payments,
+            AND b.expiration_date < NOW() - INTERVAL '7 days' THEN b.id END) as overdue_payments,
           COUNT(DISTINCT CASE WHEN b.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE+45
             AND b.status='issued'
             AND NOT EXISTS (SELECT 1 FROM bk_renewal_alerts ra WHERE ra.bond_id=b.id AND ra.status='renewed')
             THEN b.id END) as renewals_due
         FROM bk_bonds b
-        LEFT JOIN bk_bond_payments py ON py.bond_id = b.id
       `, [month]),
       pool.query(`SELECT running_balance FROM bk_trust_account ORDER BY id DESC LIMIT 1`),
       pool.query(`
