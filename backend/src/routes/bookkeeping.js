@@ -724,3 +724,41 @@ bookkeepingRouter.post('/jobs/run-all', async (req, res) => {
     res.json({ renewal, payment, remit });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// P&L endpoint
+bookkeepingRouter.get('/pl', async (req, res) => {
+  const { from, to } = req.query;
+  try {
+    const conds = ['1=1'];
+    const params = [];
+    let p = 1;
+    if (from) { conds.push(`effective_date >= $${p++}`); params.push(from); }
+    if (to)   { conds.push(`effective_date <= $${p++}`); params.push(to); }
+
+    const { rows: revRows } = await pool.query(
+      `SELECT bond_type, ROUND(SUM(premium * commission_rate),2) AS commission
+       FROM bk_bonds WHERE ${conds.join(' AND ')} AND status='issued'
+       GROUP BY bond_type ORDER BY commission DESC`,
+      params
+    );
+    const revenue = revRows.reduce((s,r) => s + parseFloat(r.commission), 0);
+
+    const expConds = ['1=1'];
+    const expParams = [];
+    let ep = 1;
+    if (from) { expConds.push(`e.expense_date >= $${ep++}`); expParams.push(from); }
+    if (to)   { expConds.push(`e.expense_date <= $${ep++}`); expParams.push(to); }
+
+    const { rows: expRows } = await pool.query(
+      `SELECT COALESCE(pc.name, c.name, 'Uncategorized') AS category, ROUND(SUM(e.amount),2) AS total
+       FROM bk_expenses e
+       LEFT JOIN bk_expense_categories c ON c.id = e.category_id
+       LEFT JOIN bk_expense_categories pc ON pc.id = c.parent_id
+       WHERE ${expConds.join(' AND ')}
+       GROUP BY 1 ORDER BY total DESC`,
+      expParams
+    );
+    const total_expenses = expRows.reduce((s,r) => s + parseFloat(r.total), 0);
+
+    res.json({ revenue, total_expenses, revenue_by_type: revRows, expenses_by_category: expRows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});

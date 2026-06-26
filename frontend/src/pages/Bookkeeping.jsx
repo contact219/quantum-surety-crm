@@ -806,6 +806,31 @@ function ReportsTab() {
     setToast(`${label}: ${JSON.stringify(d)}`);
   };
 
+  const [narrative, setNarrative] = useState(null);
+  const [narrativeLoading, setNarrativeLoading] = useState(false);
+  const [anomalies, setAnomalies] = useState(null);
+  const [anomalyLoading, setAnomalyLoading] = useState(false);
+
+  const genNarrative = async () => {
+    setNarrativeLoading(true);
+    try {
+      const r = await fetch(`${API}/ai/narrative`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ month }) });
+      setNarrative(await r.json());
+    } catch {}
+    setNarrativeLoading(false);
+  };
+
+  const checkAnomalies = async () => {
+    setAnomalyLoading(true);
+    try {
+      const r = await fetch(`${API}/ai/anomalies?month=${month}`);
+      setAnomalies(await r.json());
+    } catch {}
+    setAnomalyLoading(false);
+  };
+
+  const ANOMALY_COLORS = { high:'#ef4444', medium:'#f59e0b', low:'#6366f1' };
+
   return (
     <div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
@@ -832,6 +857,57 @@ function ReportsTab() {
             <Btn variant="ghost" onClick={()=>runJob('payment-overdue-scan','Payment scan')}>Payment Overdue Scan</Btn>
             <Btn variant="ghost" onClick={()=>runJob('auto-remittance','Auto-remittance')}>Auto-Remittance</Btn>
           </div>
+        </Card>
+
+        {/* AI Monthly Narrative */}
+        <Card style={{gridColumn:'1/-1'}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>???? AI Monthly Narrative</div>
+          <div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center',flexWrap:'wrap'}}>
+            <span style={{fontSize:13,color:'var(--text-dim)'}}>Month:</span>
+            <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
+              style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13}}/>
+            <Btn onClick={genNarrative} disabled={narrativeLoading}>{narrativeLoading?'Claude is writing???':'Generate Narrative'}</Btn>
+            <Btn onClick={checkAnomalies} disabled={anomalyLoading} style={{background:'#f59e0b',color:'#000'}}>{anomalyLoading?'Analyzing???':'???? Check for Anomalies'}</Btn>
+          </div>
+
+          {narrative && (
+            <div style={{marginBottom:16}}>
+              <div style={{display:'flex',gap:12,marginBottom:12,flexWrap:'wrap'}}>
+                {[['Revenue',`$${parseFloat(narrative.summary?.revenue||0).toFixed(2)}`,'#22c55e'],
+                  ['Expenses',`$${parseFloat(narrative.summary?.total_expenses||0).toFixed(2)}`,'#ef4444'],
+                  ['Net Income',`$${parseFloat(narrative.summary?.net_income||0).toFixed(2)}`,parseFloat(narrative.summary?.net_income||0)>=0?'#22c55e':'#ef4444'],
+                  ['Bonds Issued',`${narrative.summary?.bond_count||0}`,'var(--gold)']].map(([l,v,c])=>(
+                  <div key={l} style={{background:'var(--muted)',borderRadius:8,padding:'10px 16px',flex:1,minWidth:120,textAlign:'center'}}>
+                    <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4,textTransform:'uppercase',letterSpacing:1}}>{l}</div>
+                    <div style={{fontSize:18,fontWeight:800,color:c}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{background:'rgba(99,102,241,0.08)',border:'1px solid rgba(99,102,241,0.3)',borderRadius:8,padding:'16px 20px',fontSize:14,lineHeight:1.8,color:'white',whiteSpace:'pre-wrap'}}>
+                {narrative.narrative}
+              </div>
+            </div>
+          )}
+
+          {anomalies && anomalies.anomalies?.length > 0 && (
+            <div>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:'#f59e0b'}}>??? Anomalies Detected</div>
+              {anomalies.anomalies.map((a,i)=>(
+                <div key={i} style={{display:'flex',gap:12,padding:'10px 14px',borderRadius:8,marginBottom:6,background:'var(--muted)',border:`1px solid ${ANOMALY_COLORS[a.severity]||'#6b7280'}22`}}>
+                  <span style={{color:ANOMALY_COLORS[a.severity]||'#6b7280',fontSize:12,fontWeight:700,minWidth:50,textTransform:'uppercase'}}>{a.severity}</span>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600}}>{a.message}</div>
+                    <div style={{fontSize:12,color:'var(--text-dim)',marginTop:2}}>{a.action}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {anomalies && (!anomalies.anomalies?.length) && (
+            <div style={{fontSize:13,color:'#22c55e',padding:'8px 14px',background:'rgba(34,197,94,0.08)',borderRadius:8,border:'1px solid rgba(34,197,94,0.3)'}}>
+              ??? No anomalies detected for {month}
+            </div>
+          )}
         </Card>
 
         {/* Expense Report */}
@@ -973,6 +1049,44 @@ function ExpensesTab() {
   const [uploading, setUploading] = useState(null);
   const [form, setForm] = useState({ category_id:'', vendor:'', description:'', amount:'', expense_date: new Date().toISOString().slice(0,10), payment_method:'card', reference_number:'', notes:'' });
   const fileRef = { current: null };
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [catSuggestion, setCatSuggestion] = useState(null);
+  const [catLoading, setCatLoading] = useState(false);
+  const ocrRef = useRef(null);
+
+  const scanReceipt = async (file) => {
+    setOcrLoading(true);
+    const fd = new FormData();
+    fd.append('receipt', file);
+    try {
+      const r = await fetch(`${API}/ai/ocr`, { method:'POST', body:fd });
+      const d = await r.json();
+      if (d.ok && d.data) {
+        const cat = categories.find(c => c.name === d.data.suggested_category);
+        setForm(f => ({
+          ...f,
+          vendor: d.data.vendor || f.vendor,
+          amount: d.data.amount ? String(d.data.amount) : f.amount,
+          expense_date: d.data.date || f.expense_date,
+          description: d.data.description || f.description,
+          category_id: cat ? cat.id : f.category_id,
+        }));
+        if (cat) setCatSuggestion({ category_name: cat.name, reason: 'Detected from receipt', confidence: d.data.confidence || 0.9 });
+      }
+    } catch {}
+    setOcrLoading(false);
+  };
+
+  const suggestCategory = async (vendor, description) => {
+    if (!vendor && !description) return;
+    setCatLoading(true);
+    try {
+      const r = await fetch(`${API}/ai/categorize`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ vendor, description }) });
+      const d = await r.json();
+      if (d.category_id) setCatSuggestion(d);
+    } catch {}
+    setCatLoading(false);
+  };
 
   const loadAll = useCallback(() => {
     const p = new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([,v])=>v)));
@@ -1170,15 +1284,35 @@ function ExpensesTab() {
       {showAdd && (
         <Modal title={editing ? 'Edit Expense' : 'Add Expense'} onClose={()=>setShowAdd(false)}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+            {/* OCR scan */}
+            <div style={{marginBottom:14,gridColumn:'1/-1',display:'flex',gap:8,alignItems:'center'}}>
+              <label style={{cursor:'pointer'}}>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:'none'}}
+                  onChange={e=>{ if(e.target.files?.[0]) scanReceipt(e.target.files[0]); e.target.value=''; }}/>
+                <span style={{fontSize:13,padding:'7px 14px',background:'#6366f1',color:'white',borderRadius:6,cursor:'pointer',display:'inline-block'}}>
+                  {ocrLoading ? '🤖 Scanning???' : '🤖 Scan Receipt / Invoice'}
+                </span>
+              </label>
+              {ocrLoading && <span style={{fontSize:12,color:'var(--text-dim)'}}>Claude is reading your receipt???</span>}
+            </div>
             <div style={{marginBottom:14,gridColumn:'1/-1'}}>
               <label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:4}}>Category</label>
               <select value={form.category_id} onChange={e=>setForm(f=>({...f,category_id:e.target.value}))}
                 style={{width:'100%',background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'white',fontSize:14}}>
-                <option value="">— Select category —</option>
+                <option value="">??? Select category ???</option>
                 {opts.map(o=><option key={o.value} value={o.value} style={{fontWeight:o.isParent?700:400}}>{o.label}</option>)}
               </select>
+              {catSuggestion && (
+                <div style={{marginTop:6,fontSize:12,background:'rgba(99,102,241,0.1)',border:'1px solid #6366f1',borderRadius:6,padding:'6px 10px',display:'flex',gap:8,alignItems:'center'}}>
+                  <span style={{color:'#6366f1'}}>🤖 AI: <strong>{catSuggestion.category_name}</strong></span>
+                  <span style={{color:'var(--text-dim)'}}>{catSuggestion.reason}</span>
+                  <button onClick={()=>{const c=categories.find(x=>x.id===catSuggestion.category_id);if(c)setForm(f=>({...f,category_id:c.id}));setCatSuggestion(null);}} style={{marginLeft:'auto',fontSize:11,padding:'2px 8px',background:'#6366f1',color:'white',border:'none',borderRadius:4,cursor:'pointer'}}>Apply</button>
+                  <button onClick={()=>setCatSuggestion(null)} style={{fontSize:11,color:'var(--text-dim)',background:'none',border:'none',cursor:'pointer'}}>x</button>
+                </div>
+              )}
             </div>
-            <FInput label="Vendor / Payee" value={form.vendor} onChange={e=>setForm(f=>({...f,vendor:e.target.value}))}/>
+            <FInput label="Vendor / Payee" value={form.vendor}
+              onChange={e=>{setForm(f=>({...f,vendor:e.target.value}));if(e.target.value.length>2)suggestCategory(e.target.value,form.description);}}/>
             <FInput label="Amount ($)" type="number" step="0.01" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/>
             <FInput label="Date" type="date" value={form.expense_date} onChange={e=>setForm(f=>({...f,expense_date:e.target.value}))}/>
             <FSelect label="Payment Method" value={form.payment_method} onChange={e=>setForm(f=>({...f,payment_method:e.target.value}))}
@@ -1197,8 +1331,469 @@ function ExpensesTab() {
   );
 }
 
+
+// ????????? P&L TAB ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+function PLTab() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const [from, setFrom] = useState(`${y}-01-01`);
+  const [to,   setTo]   = useState(`${y}-12-31`);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API}/pl?from=${from}&to=${to}`);
+      setData(await r.json());
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [from, to]);
+
+  const presets = [
+    ['This Year', `${y}-01-01`, `${y}-12-31`],
+    ['Last Year', `${y-1}-01-01`, `${y-1}-12-31`],
+    ['Q1', `${y}-01-01`, `${y}-03-31`],
+    ['Q2', `${y}-04-01`, `${y}-06-30`],
+    ['Q3', `${y}-07-01`, `${y}-09-30`],
+    ['Q4', `${y}-10-01`, `${y}-12-31`],
+  ];
+
+  const sf = { background:'var(--muted)', border:'1px solid var(--border)', borderRadius:6, padding:'7px 10px', color:'white', fontSize:13 };
+  const rev = data ? parseFloat(data.revenue||0) : 0;
+  const exp = data ? parseFloat(data.total_expenses||0) : 0;
+  const net = rev - exp;
+  const margin = rev > 0 ? (net/rev*100).toFixed(1) : 0;
+
+  return (
+    <div>
+      {/* Period controls */}
+      <div style={{display:'flex',gap:8,marginBottom:20,flexWrap:'wrap',alignItems:'center'}}>
+        {presets.map(([l,f,t])=>(
+          <button key={l} onClick={()=>{setFrom(f);setTo(t);}}
+            style={{fontSize:12,padding:'5px 12px',borderRadius:6,border:'1px solid var(--border)',background: from===f&&to===t?'var(--gold)':'var(--muted)',color: from===f&&to===t?'#000':'white',cursor:'pointer',fontWeight: from===f&&to===t?700:400}}>{l}</button>
+        ))}
+        <input type="date" value={from} onChange={e=>setFrom(e.target.value)} style={sf}/>
+        <span style={{color:'var(--text-dim)'}}>???</span>
+        <input type="date" value={to} onChange={e=>setTo(e.target.value)} style={sf}/>
+      </div>
+
+      {loading && <div style={{color:'var(--text-dim)',padding:20}}>Loading???</div>}
+      {data && !loading && (
+        <>
+          {/* KPI row */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
+            {[
+              ['Revenue', `$${rev.toFixed(2)}`, '#22c55e'],
+              ['Expenses', `$${exp.toFixed(2)}`, '#ef4444'],
+              ['Net Income', `$${net.toFixed(2)}`, net>=0?'#22c55e':'#ef4444'],
+              ['Margin', `${margin}%`, net>=0?'var(--gold)':'#ef4444'],
+            ].map(([l,v,c])=>(
+              <Card key={l} style={{textAlign:'center'}}>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>{l}</div>
+                <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
+              </Card>
+            ))}
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+            {/* Revenue breakdown */}
+            <Card>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:14,color:'#22c55e'}}>Revenue ??? by Bond Type</div>
+              {data.revenue_by_type?.length ? data.revenue_by_type.map(r=>(
+                <div key={r.bond_type} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
+                  <span style={{color:'var(--text-dim)'}}>{r.bond_type||'Other'}</span>
+                  <span style={{color:'#22c55e',fontWeight:600}}>${parseFloat(r.commission).toFixed(2)}</span>
+                </div>
+              )) : <div style={{color:'var(--text-dim)',fontSize:13}}>No bond revenue in period</div>}
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,marginTop:8,paddingTop:8,borderTop:'2px solid var(--border)'}}>
+                <span>Total</span><span style={{color:'#22c55e'}}>${rev.toFixed(2)}</span>
+              </div>
+            </Card>
+
+            {/* Expense breakdown */}
+            <Card>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:14,color:'#ef4444'}}>Expenses ??? by Category</div>
+              {data.expenses_by_category?.length ? data.expenses_by_category.map(e=>(
+                <div key={e.category} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
+                  <span style={{color:'var(--text-dim)'}}>{e.category}</span>
+                  <span style={{color:'#ef4444',fontWeight:600}}>${parseFloat(e.total).toFixed(2)}</span>
+                </div>
+              )) : <div style={{color:'var(--text-dim)',fontSize:13}}>No expenses in period</div>}
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,marginTop:8,paddingTop:8,borderTop:'2px solid var(--border)'}}>
+                <span>Total</span><span style={{color:'#ef4444'}}>${exp.toFixed(2)}</span>
+              </div>
+            </Card>
+          </div>
+
+          {/* Net income bar */}
+          <Card style={{marginTop:16}}>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>Net Income Summary</div>
+            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
+              <div style={{flex:1,height:24,background:'var(--muted)',borderRadius:4,overflow:'hidden'}}>
+                <div style={{height:'100%',width:`${Math.min(100,rev>0?(rev/(rev+exp)*100):0).toFixed(1)}%`,background:'#22c55e',borderRadius:4}}/>
+              </div>
+              <span style={{fontSize:13,color:'var(--text-dim)',minWidth:80,textAlign:'right'}}>Rev: ${rev.toFixed(0)}</span>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <div style={{flex:1,height:24,background:'var(--muted)',borderRadius:4,overflow:'hidden'}}>
+                <div style={{height:'100%',width:`${Math.min(100,rev>0?(exp/rev*100):0).toFixed(1)}%`,background:'#ef4444',borderRadius:4}}/>
+              </div>
+              <span style={{fontSize:13,color:'var(--text-dim)',minWidth:80,textAlign:'right'}}>Exp: ${exp.toFixed(0)}</span>
+            </div>
+            <div style={{marginTop:12,fontSize:15,fontWeight:700,color:net>=0?'#22c55e':'#ef4444'}}>
+              Net: ${net.toFixed(2)} ({margin}% margin)
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ????????? BILLS TAB (A/P) ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+function BillsTab() {
+  const [bills, setBills]     = useState([]);
+  const [cats,  setCats]      = useState([]);
+  const [filter, setFilter]   = useState('all');
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const [payModal, setPayModal] = useState(null);
+  const [uploading, setUploading] = useState(null);
+  const emptyForm = { vendor:'', invoice_number:'', description:'', amount:'', invoice_date:'', due_date:'', status:'unpaid', category_id:'', notes:'' };
+  const [form, setForm] = useState(emptyForm);
+  const [payForm, setPayForm] = useState({ paid_date: new Date().toISOString().slice(0,10), paid_amount:'', payment_method:'card' });
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => { if(toast){const t=setTimeout(()=>setToast(null),4000);return()=>clearTimeout(t);} },[toast]);
+
+  const load = () => {
+    const p = filter !== 'all' ? `?status=${filter}` : '';
+    fetch(`${API}/bills${p}`).then(r=>r.json()).then(setBills).catch(()=>{});
+  };
+  useEffect(()=>{ fetch(`${API}/categories`).then(r=>r.json()).then(setCats).catch(()=>{}); },[]);
+  useEffect(()=>{ load(); },[filter]);
+
+  const catOpts = () => {
+    const parents = cats.filter(c=>!c.parent_id);
+    const children = cats.filter(c=>c.parent_id);
+    const opts = [];
+    for(const p of parents){
+      opts.push({value:p.id,label:p.name,isParent:true});
+      for(const c of children.filter(c=>c.parent_id===p.id)) opts.push({value:c.id,label:`  ??? ${c.name}`});
+    }
+    return opts;
+  };
+
+  const save = async () => {
+    const method = editing ? 'PUT' : 'POST';
+    const url = editing ? `${API}/bills/${editing}` : `${API}/bills`;
+    const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(form)});
+    if(r.ok){setShowAdd(false);setEditing(null);setForm(emptyForm);load();}
+  };
+
+  const del = async (id) => {
+    if(!window.confirm('Delete this bill?')) return;
+    await fetch(`${API}/bills/${id}`,{method:'DELETE'});
+    load();
+  };
+
+  const markPaid = async () => {
+    const r = await fetch(`${API}/bills/${payModal.id}/pay`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payForm)});
+    if(r.ok){setPayModal(null);setToast('Bill marked paid ??? expense entry created');load();}
+    else setToast('Error marking paid');
+  };
+
+  const uploadDocs = async (billId, files) => {
+    setUploading(billId);
+    const fd = new FormData();
+    for(const f of files) fd.append('files',f);
+    await fetch(`${API}/bills/${billId}/documents`,{method:'POST',body:fd});
+    setUploading(null);
+    load();
+  };
+
+  const delDoc = async (docId) => {
+    if(!window.confirm('Delete file?')) return;
+    await fetch(`${API}/bill-documents/${docId}`,{method:'DELETE'});
+    load();
+  };
+
+  const totalUnpaid = bills.filter(b=>b.status==='unpaid'||b.status==='overdue').reduce((s,b)=>s+parseFloat(b.amount||0),0);
+  const overdue = bills.filter(b=>b.status==='overdue').length;
+  const sf = {background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13};
+  const opts = catOpts();
+  const STATUS_COLORS = {unpaid:'#f59e0b',paid:'#22c55e',overdue:'#ef4444',void:'#6b7280'};
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:12,marginBottom:20,flexWrap:'wrap'}}>
+        <Card style={{flex:1,minWidth:130}}>
+          <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4,textTransform:'uppercase',letterSpacing:1}}>Total Unpaid</div>
+          <div style={{fontSize:24,fontWeight:800,color:'#f59e0b'}}>${totalUnpaid.toFixed(2)}</div>
+        </Card>
+        <Card style={{flex:1,minWidth:130}}>
+          <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4,textTransform:'uppercase',letterSpacing:1}}>Overdue</div>
+          <div style={{fontSize:24,fontWeight:800,color:'#ef4444'}}>{overdue}</div>
+        </Card>
+        <Card style={{flex:1,minWidth:130}}>
+          <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4,textTransform:'uppercase',letterSpacing:1}}>Total Bills</div>
+          <div style={{fontSize:24,fontWeight:800}}>{bills.length}</div>
+        </Card>
+      </div>
+
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+        {['all','unpaid','overdue','paid','void'].map(s=>(
+          <button key={s} onClick={()=>setFilter(s)}
+            style={{fontSize:12,padding:'5px 12px',borderRadius:6,border:'1px solid var(--border)',
+              background:filter===s?STATUS_COLORS[s]||'var(--gold)':'var(--muted)',
+              color:filter===s&&s!=='all'?'#fff':'white',cursor:'pointer',textTransform:'capitalize'}}>{s}</button>
+        ))}
+        <div style={{flex:1}}/>
+        <Btn onClick={()=>{setEditing(null);setForm(emptyForm);setShowAdd(true);}}>+ Add Bill</Btn>
+      </div>
+
+      <Card style={{padding:0,overflow:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <thead>
+            <tr style={{background:'var(--muted)',color:'var(--text-dim)',fontSize:11,textTransform:'uppercase'}}>
+              {['Vendor','Invoice #','Amount','Due Date','Status','Docs',''].map(h=>(
+                <th key={h} style={{textAlign:'left',padding:'10px 14px',whiteSpace:'nowrap'}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {bills.map(b=>(
+              <>
+                <tr key={b.id} style={{borderTop:'1px solid var(--border)',cursor:'pointer'}} onClick={()=>setExpanded(expanded===b.id?null:b.id)}>
+                  <td style={{padding:'10px 14px',fontWeight:500}}>{b.vendor}</td>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)',fontSize:12}}>{b.invoice_number||'???'}</td>
+                  <td style={{padding:'10px 14px',color:'var(--gold)',fontWeight:600}}>${parseFloat(b.amount).toFixed(2)}</td>
+                  <td style={{padding:'10px 14px',color: b.status==='overdue'?'#ef4444':'var(--text-dim)',whiteSpace:'nowrap'}}>{b.due_date?.slice(0,10)||'???'}</td>
+                  <td style={{padding:'10px 14px'}}>
+                    <span style={{background:STATUS_COLORS[b.status]||'#6b7280',color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,textTransform:'capitalize'}}>{b.status}</span>
+                  </td>
+                  <td style={{padding:'10px 14px'}}>
+                    {b.documents?.length>0 ? <span style={{color:'#3b82f6',fontSize:12}}>???? {b.documents.length}</span> : <span style={{color:'var(--text-dim)',fontSize:12}}>???</span>}
+                  </td>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)'}}>???</td>
+                </tr>
+                {expanded===b.id && (
+                  <tr key={`${b.id}-exp`}><td colSpan={7} style={{background:'var(--muted)',padding:'14px 20px'}}>
+                    {b.description && <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:6}}>{b.description}</div>}
+                    {b.notes && <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:8,fontStyle:'italic'}}>{b.notes}</div>}
+                    <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:10}}>
+                      Invoice date: {b.invoice_date?.slice(0,10)||'???'} ?? Category: {b.category_name||'Uncategorized'}
+                      {b.status==='paid' && ` ?? Paid ${b.paid_date?.slice(0,10)} via ${b.payment_method} ($${parseFloat(b.paid_amount||0).toFixed(2)})`}
+                    </div>
+
+                    <div style={{marginBottom:10}}>
+                      <div style={{fontSize:12,fontWeight:700,marginBottom:6}}>Documents</div>
+                      {b.documents?.length>0 ? (
+                        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
+                          {b.documents.map(doc=>(
+                            <div key={doc.id} style={{display:'flex',alignItems:'center',gap:6,background:'var(--dark)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 10px',fontSize:12}}>
+                              <a href={`/api/bookkeeping/bill-uploads/${doc.filename}`} target="_blank" rel="noreferrer" style={{color:'#3b82f6',textDecoration:'none'}}>{doc.original_name}</a>
+                              <button onClick={()=>delDoc(doc.id)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:14}}>??</button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:8}}>No documents</div>}
+                      <label style={{cursor:'pointer'}}>
+                        <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.csv" style={{display:'none'}}
+                          onChange={e=>{if(e.target.files?.length)uploadDocs(b.id,[...e.target.files]);e.target.value='';}}/>
+                        <span style={{fontSize:12,padding:'5px 12px',background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,color:'white',cursor:'pointer'}}>
+                          {uploading===b.id?'Uploading...':'+ Upload Invoice'}
+                        </span>
+                      </label>
+                    </div>
+
+                    <div style={{display:'flex',gap:6,marginTop:8}}>
+                      {(b.status==='unpaid'||b.status==='overdue') && (
+                        <Btn onClick={()=>{setPayModal(b);setPayForm({paid_date:new Date().toISOString().slice(0,10),paid_amount:b.amount,payment_method:'card'});}}
+                          style={{fontSize:12,padding:'4px 12px',background:'#22c55e'}}>??? Mark Paid</Btn>
+                      )}
+                      <Btn onClick={()=>{setEditing(b.id);setForm({vendor:b.vendor,invoice_number:b.invoice_number||'',description:b.description||'',amount:b.amount,invoice_date:b.invoice_date?.slice(0,10)||'',due_date:b.due_date?.slice(0,10)||'',status:b.status,category_id:b.category_id||'',notes:b.notes||''});setShowAdd(true);}} style={{fontSize:12,padding:'4px 12px'}}>Edit</Btn>
+                      <Btn variant="danger" onClick={()=>del(b.id)} style={{fontSize:12,padding:'4px 12px'}}>Delete</Btn>
+                    </div>
+                  </td></tr>
+                )}
+              </>
+            ))}
+            {!bills.length && <tr><td colSpan={7} style={{padding:'24px 14px',color:'var(--text-dim)',textAlign:'center'}}>No bills found</td></tr>}
+          </tbody>
+        </table>
+      </Card>
+
+      {showAdd && (
+        <Modal title={editing?'Edit Bill':'Add Bill / Invoice'} onClose={()=>{setShowAdd(false);setEditing(null);setForm(emptyForm);}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+            <FInput label="Vendor / Payee" value={form.vendor} onChange={e=>setForm(f=>({...f,vendor:e.target.value}))}/>
+            <FInput label="Invoice #" value={form.invoice_number} onChange={e=>setForm(f=>({...f,invoice_number:e.target.value}))}/>
+            <FInput label="Amount ($)" type="number" step="0.01" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/>
+            <FInput label="Invoice Date" type="date" value={form.invoice_date} onChange={e=>setForm(f=>({...f,invoice_date:e.target.value}))}/>
+            <FInput label="Due Date" type="date" value={form.due_date} onChange={e=>setForm(f=>({...f,due_date:e.target.value}))}/>
+            <FSelect label="Status" value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))} options={['unpaid','paid','void']}/>
+            <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+              <label style={{display:'block',fontSize:12,color:'var(--text-dim)',marginBottom:4}}>Category</label>
+              <select value={form.category_id} onChange={e=>setForm(f=>({...f,category_id:e.target.value}))}
+                style={{width:'100%',background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'white',fontSize:14}}>
+                <option value="">??? Select category ???</option>
+                {opts.map(o=><option key={o.value} value={o.value} style={{fontWeight:o.isParent?700:400}}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <FInput label="Description / Notes" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+            <Btn variant="ghost" onClick={()=>{setShowAdd(false);setEditing(null);setForm(emptyForm);}}>Cancel</Btn>
+            <Btn onClick={save}>{editing?'Save Changes':'Add Bill'}</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {payModal && (
+        <Modal title={`Mark Paid ??? ${payModal.vendor}`} onClose={()=>setPayModal(null)}>
+          <FInput label="Payment Date" type="date" value={payForm.paid_date} onChange={e=>setPayForm(f=>({...f,paid_date:e.target.value}))}/>
+          <FInput label="Amount Paid ($)" type="number" step="0.01" value={payForm.paid_amount} onChange={e=>setPayForm(f=>({...f,paid_amount:e.target.value}))}/>
+          <FSelect label="Payment Method" value={payForm.payment_method} onChange={e=>setPayForm(f=>({...f,payment_method:e.target.value}))} options={['card','check','ach','wire','cash']}/>
+          <div style={{fontSize:12,color:'var(--text-dim)',margin:'8px 0',background:'var(--muted)',padding:'8px 12px',borderRadius:6}}>
+            An expense entry will be created automatically in the Expenses tab.
+          </div>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+            <Btn variant="ghost" onClick={()=>setPayModal(null)}>Cancel</Btn>
+            <Btn onClick={markPaid} style={{background:'#22c55e'}}>Confirm Payment</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {toast && <div style={{position:'fixed',bottom:24,right:24,background:'#1e293b',border:'1px solid var(--gold)',color:'white',padding:'12px 20px',borderRadius:8,fontSize:13,zIndex:999}}>{toast}</div>}
+    </div>
+  );
+}
+
+// ????????? TAX TAB ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+function TaxTab() {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API}/ai/tax-estimate?year=${year}`);
+      setData(await r.json());
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(()=>{ load(); },[year]);
+
+  const Q_DATES = [
+    {q:'Q1 (Jan???Mar)',due:'April 15'},
+    {q:'Q2 (Apr???Jun)',due:'June 16'},
+    {q:'Q3 (Jul???Sep)',due:'Sept 15'},
+    {q:'Q4 (Oct???Dec)',due:'Jan 15 (next year)'},
+  ];
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:8,marginBottom:20,alignItems:'center'}}>
+        <span style={{color:'var(--text-dim)',fontSize:13}}>Tax Year:</span>
+        <select value={year} onChange={e=>setYear(parseInt(e.target.value))}
+          style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 12px',color:'white',fontSize:13}}>
+          {[2023,2024,2025,2026].map(y=><option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
+      {loading && <div style={{color:'var(--text-dim)',padding:20}}>Calculating???</div>}
+      {data && !loading && (
+        <>
+          {/* YTD summary */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:20}}>
+            {[
+              ['Gross Revenue', `$${parseFloat(data.ytd?.revenue||0).toFixed(2)}`, '#22c55e'],
+              ['Total Expenses', `$${parseFloat(data.ytd?.expenses||0).toFixed(2)}`, '#ef4444'],
+              ['Net Income', `$${parseFloat(data.ytd?.net_income||0).toFixed(2)}`, parseFloat(data.ytd?.net_income||0)>=0?'#22c55e':'#ef4444'],
+              ['Est. Total Tax', `$${parseFloat(data.ytd?.total_tax||0).toFixed(2)}`, 'var(--gold)'],
+            ].map(([l,v,c])=>(
+              <Card key={l} style={{textAlign:'center'}}>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4,textTransform:'uppercase',letterSpacing:1}}>{l}</div>
+                <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+              </Card>
+            ))}
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:20}}>
+            {/* Federal tax breakdown */}
+            <Card>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>Federal Tax Estimate ({year})</div>
+              {[
+                ['Net SE Income', `$${parseFloat(data.federal?.net_income||0).toFixed(2)}`],
+                ['SE Tax (15.3%)', `$${parseFloat(data.federal?.se_tax||0).toFixed(2)}`],
+                ['SE Tax Deduction', `-$${parseFloat(data.federal?.se_deduction||0).toFixed(2)}`],
+                ['Taxable Income', `$${parseFloat(data.federal?.taxable_income||0).toFixed(2)}`],
+                ['Income Tax Est.', `$${parseFloat(data.federal?.income_tax||0).toFixed(2)}`],
+                ['Total Federal', `$${parseFloat(data.federal?.total_tax||0).toFixed(2)}`],
+              ].map(([l,v])=>(
+                <div key={l} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'5px 0',borderBottom:'1px solid var(--border)'}}>
+                  <span style={{color:'var(--text-dim)'}}>{l}</span>
+                  <span style={{fontWeight:600}}>{v}</span>
+                </div>
+              ))}
+              <div style={{marginTop:10,fontSize:12,color:'var(--text-dim)',fontStyle:'italic'}}>
+                Estimate only. Consult your tax professional.
+              </div>
+            </Card>
+
+            {/* Texas + quarterly schedule */}
+            <Card>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>Texas Franchise Tax</div>
+              <div style={{fontSize:13,background:parseFloat(data.ytd?.revenue||0)<2470000?'rgba(34,197,94,0.1)':'rgba(239,68,68,0.1)',border:`1px solid ${parseFloat(data.ytd?.revenue||0)<2470000?'#22c55e':'#ef4444'}`,borderRadius:8,padding:'12px 14px',marginBottom:16,color:parseFloat(data.ytd?.revenue||0)<2470000?'#22c55e':'#ef4444'}}>
+                {parseFloat(data.ytd?.revenue||0) < 2470000
+                  ? '??? Revenue under $2,470,000 threshold ??? No Tax Due. Must still file PIR.'
+                  : '??? Revenue over threshold ??? franchise tax applies (0.75% of taxable margin).'}
+              </div>
+              <div style={{fontSize:13,marginBottom:8,fontWeight:700}}>Key Filing Dates</div>
+              {[
+                {label:'Texas Franchise Tax / PIR', date:'May 15', color:'#f59e0b'},
+                {label:'1099-NEC from RLI', date:'Jan 31', color:'#6366f1'},
+                {label:'Schedule C (Form 1040)', date:'April 15', color:'#3b82f6'},
+              ].map(({label,date,color})=>(
+                <div key={label} style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'5px 0',borderBottom:'1px solid var(--border)'}}>
+                  <span style={{color:'var(--text-dim)'}}>{label}</span>
+                  <span style={{color,fontWeight:700}}>{date}</span>
+                </div>
+              ))}
+            </Card>
+          </div>
+
+          {/* Quarterly payment schedule */}
+          <Card>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>Quarterly Estimated Payments (IRS Form 1040-ES)</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+              {(data.quarters||[]).map((q,i)=>(
+                <div key={i} style={{background:'var(--muted)',borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
+                  <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:2,textTransform:'uppercase',letterSpacing:1}}>{Q_DATES[i]?.q||`Q${i+1}`}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:'var(--gold)',marginBottom:2}}>${parseFloat(q.estimated_payment||0).toFixed(0)}</div>
+                  <div style={{fontSize:11,color:'var(--text-dim)'}}>Due {Q_DATES[i]?.due}</div>
+                  <div style={{fontSize:11,color:'#22c55e',marginTop:4}}>Net: ${parseFloat(q.net_income||0).toFixed(0)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:12,color:'var(--text-dim)',marginTop:12,fontStyle:'italic'}}>
+              Quarterly payment = estimated annual tax ?? 4. Based on YTD actuals projected forward.
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Bookkeeping() {
-  const TABS = ['Dashboard','Bonds','Payments','Trust Account','Remittances','Carriers','Expenses','Reports','Alerts'];
+  const TABS = ['Dashboard','Bonds','Payments','Trust Account','Remittances','Carriers','Expenses','Bills','P&L','Tax','Reports','Alerts'];
   const [tab, setTab] = useState('Dashboard');
   const [carriers, setCarriers] = useState([]);
 
@@ -1233,6 +1828,9 @@ export default function Bookkeeping() {
       {tab==='Remittances'   && <RemittancesTab carriers={carriers} />}
       {tab==='Carriers'      && <CarriersTab carriers={carriers} onRefresh={loadCarriers} />}
       {tab==='Expenses'      && <ExpensesTab />}
+      {tab==='Bills'         && <BillsTab />}
+      {tab==='P&L'           && <PLTab />}
+      {tab==='Tax'           && <TaxTab />}
       {tab==='Reports'       && <ReportsTab />}
       {tab==='Alerts'        && <AlertsTab />}
     </div>

@@ -22,6 +22,8 @@ import { filingsRouter } from './routes/filings.js';
 import { costsRouter } from './routes/costs.js';
 import { bookkeepingRouter } from './routes/bookkeeping.js';
 import { expensesRouter } from './routes/expenses.js';
+import { billsRouter, initBills } from './routes/bills.js';
+import { bkAiRouter } from './routes/bk_ai.js';
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -49,4 +51,7 @@ app.use('/api/tracking', trackingRouter);
 app.use('/api/costs', costsRouter)
 app.use('/api/bookkeeping', bookkeepingRouter);
 app.use('/api/bookkeeping', expensesRouter);
+app.use('/api/bookkeeping', billsRouter);
+app.use('/api/bookkeeping', bkAiRouter);
+initBills().catch(console.error);
 app.listen(process.env.PORT || 4000, () => console.log('CRM backend running'));
