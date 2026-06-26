@@ -371,7 +371,7 @@ export default function Notaries() {
         <div className="flex gap-2 flex-wrap items-center">
           <div className="relative">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{color:'var(--text-dim)'}}/>
-            <input defaultValue={search} onChange={handleSearchChange} placeholder="Name or email..."
+            <input defaultValue={search} onChange={handleSearchChange} placeholder="Name, email, or notary ID..."
               className="pl-8 pr-3 py-1.5 rounded-lg text-sm border outline-none w-44"
               style={{background:'var(--surface)',borderColor:'var(--border)',color:'var(--text)'}}/>
           </div>
@@ -482,8 +482,8 @@ export default function Notaries() {
         <table className="w-full text-sm" style={{tableLayout:'fixed'}}>
           <colgroup>
             <col style={{width:'32px'}}/>
-            <col style={{width:'11%'}}/><col style={{width:'11%'}}/><col style={{width:'9%'}}/>
-            <col style={{width:'20%'}}/><col style={{width:'10%'}}/><col style={{width:'7%'}}/><col/>
+            <col style={{width:'9%'}}/><col style={{width:'10%'}}/><col style={{width:'10%'}}/><col style={{width:'8%'}}/>
+            <col style={{width:'18%'}}/><col style={{width:'9%'}}/><col style={{width:'6%'}}/><col/>
           </colgroup>
           <thead style={{position:'sticky',top:0,background:'var(--dark)',zIndex:1}}>
             <tr className="border-b" style={{borderColor:'var(--border)'}}>
@@ -494,7 +494,7 @@ export default function Notaries() {
                     : <Square size={13}/>}
                 </button>
               </th>
-              {['First Name','Last Name','City','Email','Expires','Days','Surety Company'].map(h=>(
+              {['Notary ID','First Name','Last Name','City','Email','Expires','Days','Surety Company'].map(h=>(
                 <th key={h} className="text-left px-3 py-3 text-xs font-mono tracking-wider" style={{color:'var(--text-dim)'}}>{h.toUpperCase()}</th>
               ))}
             </tr>
@@ -517,6 +517,7 @@ export default function Notaries() {
                       </span>
                     )}
                   </td>
+                  <td className="px-3 py-2.5 font-mono text-xs truncate" style={{color:'var(--text-dim)'}}>{row.notary_id||'—'}</td>
                   <td className="px-3 py-2.5 text-white truncate">{row.first_name||'—'}</td>
                   <td className="px-3 py-2.5 text-white truncate">{row.last_name||'—'}</td>
                   <td className="px-3 py-2.5 truncate" style={{color:'var(--text-dim)'}}>{row.city||'—'}</td>
@@ -543,8 +544,8 @@ export default function Notaries() {
                 </tr>
               );
             })}
-            {loading&&<tr><td colSpan={8} className="px-3 py-8 text-center text-sm" style={{color:'var(--text-dim)'}}>Loading...</td></tr>}
-            {!loading&&rows.length===0&&<tr><td colSpan={8} className="px-3 py-8 text-center text-sm" style={{color:'var(--text-dim)'}}>No results found</td></tr>}
+            {loading&&<tr><td colSpan={9} className="px-3 py-8 text-center text-sm" style={{color:'var(--text-dim)'}}>Loading...</td></tr>}
+            {!loading&&rows.length===0&&<tr><td colSpan={9} className="px-3 py-8 text-center text-sm" style={{color:'var(--text-dim)'}}>No results found</td></tr>}
           </tbody>
         </table>
       </div>

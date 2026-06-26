@@ -1,6 +1,6 @@
-import React,{useState,useEffect} from 'react';
+﻿import React,{useState,useEffect} from 'react';
 import {Routes,Route,NavLink,useLocation,useNavigate} from 'react-router-dom';
-import {LayoutDashboard,Users,Mail,Upload,FileText,LogOut,Shield,Menu,X,Sparkles,Car} from 'lucide-react';
+import {LayoutDashboard,Users,Mail,Upload,FileText,LogOut,Shield,Menu,X,Sparkles,Car,DollarSign, BookOpen} from 'lucide-react';
 import Dashboard from './pages/Dashboard.jsx';
 import Contacts from './pages/Contacts.jsx';
 import Campaigns from './pages/Campaigns.jsx';
@@ -16,6 +16,8 @@ import AIPage from './pages/AI.jsx';
 import LeadsPage from './pages/Leads.jsx';
 import CallLogsPage from './pages/CallLogs.jsx';
 import FilingsPage from './pages/Filings.jsx';
+import CostTracker from './pages/CostTracker.jsx';
+import Bookkeeping from './pages/Bookkeeping.jsx';
 import {getToken,getUser,clearAuth} from './auth.js';
 import {Phone} from 'lucide-react';
 
@@ -46,9 +48,11 @@ const nav = [
   {to:'/leads',icon:FileText,label:'Leads',roles:['admin','sales']},
   {to:'/calls',icon:Phone,label:'Call Logs',roles:['admin','sales']},
   {to:'/filings',icon:FileText,label:'Filing Service',roles:['admin','sales']},
+  {to:'/costs',icon:DollarSign,label:'Cost Tracker',roles:['admin']},
   {to:'/import',icon:Upload,label:'Import',roles:['admin']},
   {to:'/ai',icon:Sparkles,label:'AI Tools',roles:['admin','sales']},
   {to:'/users',icon:Shield,label:'Users',roles:['admin']},
+    {to:'/bookkeeping',icon:BookOpen,label:'Bookkeeping',roles:['admin']},
 ];
 
 export default function App() {
@@ -155,7 +159,9 @@ export default function App() {
             <Route path="/ai" element={user.role!=='readonly'?<AIPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Access restricted</div>}/>
             <Route path="/calls" element={user.role!=="readonly"?<CallLogsPage/>:<div style={{padding:32,color:"var(--text-dim)"}}>Access restricted</div>}/>
             <Route path="/filings" element={user.role!=="readonly"?<FilingsPage/>:<div style={{padding:32,color:"var(--text-dim)"}}>Access restricted</div>}/>
+            <Route path="/costs" element={user.role==='admin'?<CostTracker/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
             <Route path="/users" element={user.role==='admin'?<UsersPage/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
+            <Route path="/bookkeeping" element={user.role==='admin'?<Bookkeeping/>:<div style={{padding:32,color:'var(--text-dim)'}}>Admin only</div>}/>
           </Routes>
         </main>
       </div>

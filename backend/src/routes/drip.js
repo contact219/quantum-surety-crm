@@ -29,7 +29,8 @@ function interpolate(template, vars) {
     .replace(/{{city}}/g,            vars.city || '')
     .replace(/{{county}}/g,          vars.county || '')
     .replace(/{{unsubscribe_url}}/g, vars.unsubscribe_url || '')
-    .replace(/{{verify_url}}/g,       vars.verify_url || '');
+    .replace(/{{verify_url}}/g,       vars.verify_url || '')
+    .replace(/{{notary_id}}/g,       vars.notary_id || '');
 }
 
 dripRouter.get('/', async (req, res) => {
@@ -323,6 +324,7 @@ dripRouter.post('/run', async (req, res) => {
           county:         c.county || '',
           unsubscribe_url: unsubUrl,
           verify_url: c.notary_id ? 'https://verify.quantumsurety.bond/verify/notary/' + c.notary_id : '',
+          notary_id:      c.notary_id || '',
         };
 
         const rawHtml = interpolate(schedule.body, vars);

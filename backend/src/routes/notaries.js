@@ -48,7 +48,7 @@ notariesRouter.get('/', async (req, res) => {
     let rows, cnt;
 
     // Use conditional sql fragments
-    const searchCond = search ? sql`AND (first_name ILIKE ${searchPct} OR last_name ILIKE ${searchPct} OR email ILIKE ${searchPct})` : sql``;
+    const searchCond = search ? sql`AND (first_name ILIKE ${searchPct} OR last_name ILIKE ${searchPct} OR email ILIKE ${searchPct} OR (first_name || ' ' || last_name) ILIKE ${searchPct} OR notary_id ILIKE ${searchPct})` : sql``;
     const cityCond   = city   ? sql`AND city ILIKE ${cityPct}` : sql``;
     const suretyCond = surety ? sql`AND surety_company ILIKE ${suretyPct}` : sql``;
     const emailCond  = has_email === 'true' ? sql`AND email != '' AND email IS NOT NULL` : sql``;

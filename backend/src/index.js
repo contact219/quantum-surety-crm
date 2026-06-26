@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import { contactsRouter } from './routes/contacts.js';
 import { emailRouter } from './routes/email.js';
@@ -19,6 +19,9 @@ import { tdlrRouter } from './routes/tdlr.js';
 import { dealerCampaignsRouter } from './routes/dealer-campaigns.js';
 import { leadsRouter } from './routes/leads.js';
 import { filingsRouter } from './routes/filings.js';
+import { costsRouter } from './routes/costs.js';
+import { bookkeepingRouter } from './routes/bookkeeping.js';
+import { expensesRouter } from './routes/expenses.js';
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -43,4 +46,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/tracking', trackingRouter);
+app.use('/api/costs', costsRouter)
+app.use('/api/bookkeeping', bookkeepingRouter);
+app.use('/api/bookkeeping', expensesRouter);
 app.listen(process.env.PORT || 4000, () => console.log('CRM backend running'));
