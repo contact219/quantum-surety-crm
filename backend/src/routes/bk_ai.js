@@ -312,8 +312,8 @@ bkAiRouter.get('/ai/tax-estimate', async (req, res) => {
         WHERE EXTRACT(YEAR FROM expense_date) = $1
         GROUP BY DATE_TRUNC('quarter', expense_date)
       ) sub
-      GROUP BY DATE_TRUNC('quarter', q)
-      ORDER BY quarter
+      GROUP BY q
+      ORDER BY q
     `, [year]);
 
     const quarters = [1,2,3,4].map(q => {
