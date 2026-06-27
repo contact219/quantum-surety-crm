@@ -909,3 +909,35 @@ bookkeepingRouter.get('/export/tax-packet', async (req, res) => {
     res.send(out);
   } catch(e){ res.status(500).json({error:e.message}); }
 });
+
+// Auto-run all recurring expenses due today
+bookkeepingRouter.post('/expenses/recurring/run-due', async (req, res) => {
+  try {
+    const { rows: due } = await pool.query(
+      'SELECT * FROM bk_recurring_expenses WHERE active=true AND next_due <= CURRENT_DATE'
+    );
+    const results = [];
+    for (const r of due) {
+      const { rows: exp } = await pool.query(
+        'INSERT INTO bk_expenses (category_id,vendor,description,amount,expense_date,payment_method,notes) VALUES ($1,$2,$3,$4,CURRENT_DATE,$5,$6) RETURNING *',
+        [r.category_id, r.vendor, r.description, r.amount, r.payment_method,
+         'Auto-created from recurring schedule' + (r.notes ? ': ' + r.notes : '')]
+      );
+      await pool.query(
+        `UPDATE bk_recurring_expenses
+         SET next_due = next_due + CASE frequency
+           WHEN 'weekly'    THEN INTERVAL '7 days'
+           WHEN 'monthly'   THEN INTERVAL '1 month'
+           WHEN 'quarterly' THEN INTERVAL '3 months'
+           ELSE INTERVAL '1 year' END,
+         run_count = run_count + 1,
+         last_run  = CURRENT_DATE
+         WHERE id = $1`,
+        [r.id]
+      );
+      results.push({ id: r.id, vendor: r.vendor, amount: r.amount, expense_id: exp[0].id });
+    }
+    console.log('[Recurring] Auto-ran ' + results.length + ' expenses due today');
+    res.json({ ok: true, ran: results.length, results });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
