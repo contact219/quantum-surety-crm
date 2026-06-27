@@ -71,6 +71,7 @@ export default function Dashboard() {
   const [dripForm,setDripForm]=useState({name:'',contact_type:'notary',filters:{expiring:'90'},emails_per_day:100,subject:'',body:'',from_name:'Quantum Surety',from_email:'info@quantumsurety.bond'});
   const [alertSending,setAlertSending]=useState(false);
   const [alertResult,setAlertResult]=useState('');
+  const [bk,setBk]=useState(null);
 
   useEffect(()=>{
     fetch('/api/contacts/stats').then(r=>r.json()).then(setStats).catch(()=>{});
@@ -82,6 +83,7 @@ export default function Dashboard() {
   const toggleDrip = async(id,status) => {
     await fetch(`/api/drip/${id}/status`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status==='active'?'paused':'active'})});
     fetch('/api/drip').then(r=>r.json()).then(setDrips);
+    fetch('/api/bookkeeping/kpi').then(r=>r.json()).then(setBk).catch(()=>{});
   };
 
   const deleteDrip = async(id) => {
@@ -131,6 +133,30 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+
+      {/* Bookkeeping KPIs */}
+      {bk&&(
+        <div style={{borderRadius:12,padding:16,border:'1px solid #1e1e2e',background:'var(--surface)',marginBottom:24}}>
+          <div style={{fontSize:10,fontFamily:'monospace',letterSpacing:2,color:'var(--gold)',marginBottom:12}}>BOOKKEEPING SNAPSHOT — {bk.snapshot_date}</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:12}}>
+            {[
+              {label:'ACTIVE BONDS',value:parseInt(bk.active_bonds||0),color:'#4CC97A',fmt:false},
+              {label:'MTD COMMISSION',value:parseFloat(bk.mtd_commission||0),color:'#C9A84C',fmt:true},
+              {label:'YTD COMMISSION',value:parseFloat(bk.ytd_commission||0),color:'#C9A84C',fmt:true},
+              {label:'EXPIRING 30D',value:parseInt(bk.expiring_30d||0),color:parseInt(bk.expiring_30d||0)>0?'#f97316':'#4CC97A',fmt:false},
+              {label:'UNPAID BILLS',value:parseFloat(bk.unpaid_bills||0),color:parseFloat(bk.unpaid_bills||0)>0?'#ef4444':'#4CC97A',fmt:true},
+            ].map(({label,value,color,fmt})=>(
+              <div key={label} style={{textAlign:'center'}}>
+                <div style={{fontFamily:'"Bebas Neue",cursive',fontSize:22,letterSpacing:2,color}}>
+                  {fmt?'$'+value.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):value}
+                </div>
+                <div style={{fontSize:9,fontFamily:'monospace',letterSpacing:1.5,color:'var(--text-dim)',marginTop:4}}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Charts row */}
       <div className='r-grid-3' style={{marginBottom:24}}>

@@ -77,19 +77,32 @@ function Card({ children, style={} }) {
   );
 }
 
-function KPI({ label, value, color, isCount }) {
+function KPI({ label, value, color, isCount, sub, onClick }) {
   const num = parseFloat(value || 0);
   const display = isCount ? Math.round(num).toString() : '$' + num.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
   return (
-    <Card style={{flex:1,minWidth:140}}>
-      <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>{label}</div>
-      <div style={{fontSize:26,fontWeight:800,color:color||'white'}}>{display}</div>
+    <Card style={{flex:1,minWidth:140,cursor:onClick?'pointer':'default',
+      transition:'border-color 0.15s', position:'relative'}}>
+      <div onClick={onClick}
+        onMouseEnter={e=>{ if(onClick) e.currentTarget.parentElement.style.borderColor='var(--gold)'; }}
+        onMouseLeave={e=>{ if(onClick) e.currentTarget.parentElement.style.borderColor='var(--border)'; }}>
+        <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>{label}</div>
+        <div style={{fontSize:26,fontWeight:800,color:color||'white'}}>{display}</div>
+        {sub && <div style={{fontSize:11,color:'var(--text-dim)',marginTop:4}}>{sub}</div>}
+        {onClick && <div style={{position:'absolute',top:12,right:14,color:'var(--text-dim)',fontSize:12}}>↗</div>}
+      </div>
     </Card>
   );
 }
 
+// Lightweight skeleton block for loading states.
+function Skeleton({ h=80, style={} }) {
+  return <div style={{height:h, borderRadius:8, background:'linear-gradient(90deg,var(--muted) 25%,var(--surface) 50%,var(--muted) 75%)',
+    backgroundSize:'200% 100%', animation:'bkshimmer 1.3s infinite', ...style}} />;
+}
+
 // ─── DASHBOARD ─────────────────────────────────────────────────────────────────
-function DashboardTab() {
+function DashboardTab({ onDrill }) {
   const [data, setData] = useState(null);
   const [month, setMonth] = useState(new Date().toISOString().slice(0,7));
   const [loading, setLoading] = useState(true);
@@ -99,65 +112,144 @@ function DashboardTab() {
     fetch(`${API}/dashboard?month=${month}`).then(r=>r.json()).then(d=>{setData(d);setLoading(false);}).catch(()=>setLoading(false));
   }, [month]);
 
-  if (loading && !data) return <div style={{padding:40,textAlign:'center',color:'var(--text-dim)'}}>Loading...</div>;
+  if (loading && !data) return (
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:24}}>
+        {Array.from({length:4}).map((_,i)=><Skeleton key={i} h={86} />)}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}><Skeleton h={160}/><Skeleton h={160}/></div>
+    </div>
+  );
   if (!data) return <div style={{padding:40,color:'#ef4444'}}>Failed to load dashboard</div>;
 
-  const maxPremium = Math.max(...(data.trend||[]).map(t=>parseFloat(t.premium||0)), 1);
+  const trend = data.trend || [];
+  const maxPremium = Math.max(...trend.map(t=>parseFloat(t.premium||0)), 1);
+  const fmt = n => '$' + parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const fmt2 = n => '$' + parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const grid = { display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:12, marginBottom:12 };
 
   return (
     <div>
-      <div style={{display:'flex',justifyContent:'flex-end',marginBottom:16}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:8}}>
+        <div style={{fontSize:12,color:'var(--text-dim)'}}>Earned figures count <b style={{color:'#22c55e'}}>issued</b> bonds only · pipeline shown separately</div>
         <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
           style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 12px',color:'white',fontSize:13}} />
       </div>
-      <div style={{display:'flex',gap:12,marginBottom:12,flexWrap:'wrap'}}>
+
+      {/* Earned KPIs */}
+      <div style={grid}>
         <KPI label="Premiums Collected" value={data.premiums_collected} color="var(--gold)" />
         <KPI label="Commission Earned" value={data.commission_earned} color="#22c55e" />
         <KPI label="Remittances Sent" value={data.remittances_sent} />
-        <KPI label="Bonds Issued" value={data.bonds_issued} isCount />
+        <KPI label="Bonds Issued" value={data.bonds_issued} isCount
+          onClick={()=>onDrill && onDrill('issued')} />
       </div>
-      <div style={{display:'flex',gap:12,marginBottom:24,flexWrap:'wrap'}}>
+      <div style={{...grid, marginBottom:16}}>
         <KPI label="Overdue Payments" value={data.overdue_payments} color={parseFloat(data.overdue_payments)>0?'#ef4444':undefined} isCount />
         <KPI label="Renewals Due (45d)" value={data.renewals_due} color={parseFloat(data.renewals_due)>0?'#f59e0b':undefined} isCount />
         <KPI label="Trust Balance" value={data.trust_balance} color="#22c55e" />
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:24}}>
+
+      {/* Pipeline (saved/draft bonds — not yet earned) */}
+      <Card style={{marginBottom:24,borderColor:'#6366f1'+'55',background:'linear-gradient(180deg,#6366f10f,transparent)'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+          <div>
+            <div style={{fontSize:11,color:'#818cf8',letterSpacing:1,textTransform:'uppercase',fontWeight:700,marginBottom:4}}>Pipeline · Saved Drafts</div>
+            <div style={{fontSize:12,color:'var(--text-dim)'}}>Quoted but not yet issued — projected, not earned revenue</div>
+          </div>
+          <div style={{display:'flex',gap:28,alignItems:'center'}}>
+            <div style={{textAlign:'right'}}>
+              <div style={{fontSize:24,fontWeight:800,color:'#a5b4fc'}}>{parseInt(data.pipeline_count||0)}</div>
+              <div style={{fontSize:10,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1}}>Drafts</div>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <div style={{fontSize:24,fontWeight:800,color:'#a5b4fc'}}>{fmt(data.pipeline_premium)}</div>
+              <div style={{fontSize:10,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1}}>Premium</div>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <div style={{fontSize:24,fontWeight:800,color:'#a5b4fc'}}>{fmt(data.pipeline_commission)}</div>
+              <div style={{fontSize:10,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1}}>Proj. Comm.</div>
+            </div>
+            <Btn variant="ghost" onClick={()=>onDrill && onDrill('saved')}>View drafts →</Btn>
+          </div>
+        </div>
+      </Card>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:16,marginBottom:24}}>
         <Card>
-          <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>6-Month Trend</div>
-          {data.trend?.length > 0 ? (
-            <div style={{display:'flex',gap:6,alignItems:'flex-end',height:80}}>
-              {data.trend.map(t => (
-                <div key={t.month} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
-                  <div style={{width:'100%',display:'flex',gap:1,alignItems:'flex-end',height:60}}>
-                    <div style={{flex:1,background:'var(--gold)',borderRadius:'2px 2px 0 0',
-                      height:`${Math.max(4, Math.round((parseFloat(t.premium||0)/maxPremium)*56))}px`}} title={`Premium: $${t.premium}`} />
-                    <div style={{flex:1,background:'#22c55e',borderRadius:'2px 2px 0 0',
-                      height:`${Math.max(2, Math.round((parseFloat(t.commission||0)/maxPremium)*56))}px`}} title={`Commission: $${t.commission}`} />
+          <div style={{fontSize:13,fontWeight:700,marginBottom:16}}>6-Month Trend <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:11}}>(issued)</span></div>
+          {trend.length > 0 ? (
+            <div style={{display:'flex',gap:10,alignItems:'flex-end',height:120,paddingTop:18}}>
+              {trend.map(t => {
+                const ph = Math.max(4, Math.round((parseFloat(t.premium||0)/maxPremium)*80));
+                const ch = Math.max(2, Math.round((parseFloat(t.commission||0)/maxPremium)*80));
+                return (
+                  <div key={t.month} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                    <div style={{fontSize:10,color:'var(--gold)',fontWeight:700}}>{fmt(t.premium)}</div>
+                    <div style={{width:'100%',display:'flex',gap:3,alignItems:'flex-end',height:84,justifyContent:'center'}}>
+                      <div style={{width:'42%',background:'var(--gold)',borderRadius:'3px 3px 0 0',height:ph+'px'}} title={`Premium: ${fmt2(t.premium)}`} />
+                      <div style={{width:'42%',background:'#22c55e',borderRadius:'3px 3px 0 0',height:ch+'px'}} title={`Commission: ${fmt2(t.commission)}`} />
+                    </div>
+                    <div style={{fontSize:10,color:'var(--text-dim)'}}>{t.month}</div>
                   </div>
-                  <div style={{fontSize:9,color:'var(--text-dim)'}}>{t.month?.slice(5)}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : <div style={{color:'var(--text-dim)',fontSize:13}}>No trend data yet</div>}
-          <div style={{display:'flex',gap:12,marginTop:8}}>
+          <div style={{display:'flex',gap:14,marginTop:12,borderTop:'1px solid var(--border)',paddingTop:10}}>
             <span style={{fontSize:11,color:'var(--text-dim)'}}><span style={{color:'var(--gold)'}}>■</span> Premium</span>
             <span style={{fontSize:11,color:'var(--text-dim)'}}><span style={{color:'#22c55e'}}>■</span> Commission</span>
           </div>
         </Card>
         <Card>
-          <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>By Carrier ({month})</div>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>By Carrier ({month}) <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:11}}>(issued)</span></div>
           {data.by_carrier?.length ? data.by_carrier.map(c => (
             <div key={c.carrier_name} style={{display:'flex',justifyContent:'space-between',
-              padding:'6px 0',borderBottom:'1px solid var(--border)',fontSize:13}}>
+              padding:'8px 0',borderBottom:'1px solid var(--border)',fontSize:13}}>
               <span>{c.carrier_name}</span>
-              <span style={{color:'var(--text-dim)'}}>{c.bond_count} bonds · <span style={{color:'var(--gold)'}}>${parseFloat(c.total_premium||0).toFixed(0)}</span></span>
+              <span style={{color:'var(--text-dim)'}}>{c.bond_count} bonds · <span style={{color:'var(--gold)'}}>{fmt(c.total_premium)}</span></span>
             </div>
-          )) : <div style={{color:'var(--text-dim)',fontSize:13}}>No data for this month</div>}
+          )) : <div style={{color:'var(--text-dim)',fontSize:13}}>No issued bonds this month</div>}
         </Card>
       </div>
+
+      <Card style={{marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>Bond Portfolio by Status</div>
+        <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:12}}>Commission on non-issued statuses is projected, not earned. Click a tile to view those bonds.</div>
+        {data.by_status?.length ? (
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {data.by_status.map(s => {
+              const earned = s.status === 'issued' || s.status === 'expired';
+              return (
+                <div key={s.status} onClick={()=>onDrill && onDrill(s.status)}
+                  style={{flex:'1 1 150px',background:'var(--muted)',borderRadius:8,padding:'10px 14px',
+                  border:'1px solid var(--border)',cursor:'pointer',transition:'border-color 0.15s'}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=STATUS_COLORS[s.status]||'#94a3b8'}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                    <span style={{background:STATUS_COLORS[s.status]||'#94a3b8',color:'#fff',
+                      padding:'2px 8px',borderRadius:4,fontSize:10,textTransform:'capitalize',fontWeight:600}}>
+                      {s.status}
+                    </span>
+                    <span style={{fontFamily:'"Bebas Neue",cursive',fontSize:22,color:STATUS_COLORS[s.status]||'#94a3b8'}}>
+                      {s.count}
+                    </span>
+                  </div>
+                  <div style={{fontSize:11,color:'var(--text-dim)'}}>{fmt2(s.total_premium)} premium</div>
+                  <div style={{fontSize:11,color:earned?'#22c55e':'#818cf8'}}>
+                    {fmt2(s.total_commission)} {earned?'commission':'projected'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : <div style={{color:'var(--text-dim)',fontSize:13}}>No bonds yet</div>}
+      </Card>
+
       <Card>
         <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>Recent Bonds</div>
-        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+        <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:480}}>
           <thead>
             <tr style={{color:'var(--text-dim)',fontSize:11,textTransform:'uppercase'}}>
               {['Insured','Type','Premium','Carrier','Status'].map(h=>(
@@ -178,15 +270,23 @@ function DashboardTab() {
             {!data.recent_bonds?.length && <tr><td colSpan={5} style={{padding:'16px 0',color:'var(--text-dim)'}}>No bonds yet</td></tr>}
           </tbody>
         </table>
+        </div>
       </Card>
     </div>
   );
 }
 
 // ─── BONDS TAB ─────────────────────────────────────────────────────────────────
-function BondsTab({ carriers }) {
+function BondsTab({ carriers, initialStatus }) {
   const [bonds, setBonds] = useState([]);
-  const [filters, setFilters] = useState({ carrier_id:'', bond_type:'', status:'', month:'', q:'' });
+  const [filters, setFilters] = useState({ carrier_id:'', bond_type:'', status:initialStatus||'', month:'', q:'' });
+
+  // When navigated here from a dashboard drill-down, apply the incoming status.
+  useEffect(() => {
+    if (initialStatus !== undefined && initialStatus !== null) {
+      setFilters(f => ({ ...f, status: initialStatus }));
+    }
+  }, [initialStatus]);
   const [showAdd, setShowAdd] = useState(false);
   const [expanded, setExpanded] = useState(null);
   const [form, setForm] = useState({ bond_number:'',carrier_id:'',insured_name:'',insured_email:'',insured_phone:'',bond_type:'notary',bond_amount:'',premium:'',commission_rate:'',effective_date:'',expiration_date:'',status:'issued',notes:'' });
@@ -367,12 +467,14 @@ function BondsTab({ carriers }) {
 // ─── PAYMENTS TAB ──────────────────────────────────────────────────────────────
 function PaymentsTab() {
   const [payments, setPayments] = useState([]);
+  const [aging, setAging] = useState([]);
   const [filters, setFilters] = useState({ status:'', month:'' });
   const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
 
   const load = useCallback(() => {
     const p = new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([,v])=>v)));
     fetch(`${API}/payments?${p}`).then(r=>r.json()).then(setPayments).catch(()=>{});
+    fetch(`${API}/payments/aging`).then(r=>r.json()).then(setAging).catch(()=>{});
   }, [filters]);
 
   useEffect(() => { load(); }, [load]);
@@ -385,8 +487,31 @@ function PaymentsTab() {
     load();
   };
 
+  const bucketColor = { '0-30':'#22c55e', '31-60':'#f59e0b', '61-90':'#f97316', '90+':'#ef4444' };
+  const agingTotal = aging.reduce((s,b)=>s+parseFloat(b.total||0),0);
+
   return (
     <div>
+      {/* Aging buckets — pending (uncollected) receivables by days outstanding */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:20}}>
+        {aging.map(b => (
+          <Card key={b.bucket} style={{borderColor:b.count>0?(bucketColor[b.bucket]+'55'):'var(--border)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+              <span style={{fontSize:11,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1}}>{b.bucket} days</span>
+              <span style={{fontSize:11,color:bucketColor[b.bucket],fontWeight:700}}>{b.count}</span>
+            </div>
+            <div style={{fontSize:22,fontWeight:800,color:b.count>0?bucketColor[b.bucket]:'var(--text-dim)'}}>
+              ${parseFloat(b.total||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+            </div>
+          </Card>
+        ))}
+        <Card style={{background:'var(--muted)'}}>
+          <div style={{fontSize:11,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1,marginBottom:4}}>Total Outstanding</div>
+          <div style={{fontSize:22,fontWeight:800,color:'var(--gold)'}}>
+            ${agingTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+          </div>
+        </Card>
+      </div>
       <div style={{display:'flex',gap:8,marginBottom:16}}>
         <select value={filters.status} onChange={e=>setFilters(f=>({...f,status:e.target.value}))} style={sf}>
           <option value="">All Statuses</option>
@@ -430,18 +555,21 @@ function PaymentsTab() {
 // ─── TRUST ACCOUNT ─────────────────────────────────────────────────────────────
 function TrustTab() {
   const [data, setData] = useState({ entries:[], current_balance:0 });
+  const [recon, setRecon] = useState(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
   const load = useCallback(() => {
     const p = new URLSearchParams(Object.fromEntries(Object.entries({from,to}).filter(([,v])=>v)));
     fetch(`${API}/trust?${p}`).then(r=>r.json()).then(setData).catch(()=>{});
+    fetch(`${API}/trust/reconciliation`).then(r=>r.json()).then(setRecon).catch(()=>{});
   }, [from, to]);
 
   useEffect(() => { load(); }, [load]);
 
   const typeColor = { premium_in:'#22c55e', commission_out:'var(--gold)', remittance_out:'#ef4444', adjustment:'#3b82f6' };
   const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
+  const money = n => '$' + parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
   return (
     <div>
@@ -456,6 +584,48 @@ function TrustTab() {
           <Btn variant="ghost" onClick={() => window.location.assign(`${API}/export/trust?from=${from}&to=${to}`)}>Export CSV</Btn>
         </div>
       </div>
+
+      {/* Reconciliation — trust balance vs. obligations owed to carriers */}
+      {recon && (
+        <Card style={{marginBottom:20, borderColor: recon.reconciled ? '#22c55e55' : (recon.variance < 0 ? '#ef444455' : '#f59e0b55')}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+            <div style={{fontSize:13,fontWeight:700}}>Trust Reconciliation</div>
+            <span style={{background:(recon.reconciled?'#22c55e':(recon.variance<0?'#ef4444':'#f59e0b'))+'22',
+              color:recon.reconciled?'#22c55e':(recon.variance<0?'#ef4444':'#f59e0b'),
+              border:`1px solid ${(recon.reconciled?'#22c55e':(recon.variance<0?'#ef4444':'#f59e0b'))}55`,
+              borderRadius:4,padding:'3px 10px',fontSize:11,fontWeight:700,textTransform:'uppercase'}}>
+              {recon.reconciled ? '✓ Reconciled' : (recon.variance < 0 ? '⚠ Shortfall' : 'Buffer')}
+            </span>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:14}}>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Trust Balance</div>
+              <div style={{fontSize:18,fontWeight:700,color:'#22c55e'}}>{money(recon.trust_balance)}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Net Owed to Carriers</div>
+              <div style={{fontSize:18,fontWeight:700}}>{money(recon.net_owed_carriers)}</div>
+              <div style={{fontSize:10,color:'var(--text-dim)'}}>{money(recon.premium_collected_unremitted)} premium − {money(recon.commission_retained)} comm</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Pending Remittances</div>
+              <div style={{fontSize:18,fontWeight:700,color:'#f59e0b'}}>{money(recon.pending_remittances)}</div>
+              <div style={{fontSize:10,color:'var(--text-dim)'}}>{recon.pending_remittance_count} draft{recon.pending_remittance_count===1?'':'s'}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Variance</div>
+              <div style={{fontSize:18,fontWeight:700,color:recon.variance<0?'#ef4444':(recon.reconciled?'#22c55e':'#f59e0b')}}>
+                {recon.variance>=0?'+':''}{money(recon.variance)}
+              </div>
+            </div>
+          </div>
+          {recon.variance < 0 && (
+            <div style={{marginTop:12,fontSize:12,color:'#ef4444'}}>
+              ⚠ Trust holds less than is owed to carriers — investigate before next remittance.
+            </div>
+          )}
+        </Card>
+      )}
       <Card style={{padding:0,overflow:'auto'}}>
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
           <thead>
@@ -2029,10 +2199,62 @@ function Tab1099() {
   );
 }
 
+// ─── AUDIT TRAIL ───────────────────────────────────────────────────────────────
+function AuditTab() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch(`${API}/audit?limit=200`).then(r=>r.json()).then(d=>{setRows(d);setLoading(false);}).catch(()=>setLoading(false));
+  }, []);
+  const actionColor = a =>
+    a?.startsWith('payment') ? '#22c55e' :
+    a?.includes('sent') ? '#3b82f6' :
+    a?.includes('confirmed') ? '#22c55e' : '#94a3b8';
+  return (
+    <div>
+      <div style={{fontSize:13,color:'var(--text-dim)',marginBottom:16}}>Immutable log of money-moving actions — payment collections and remittance status changes.</div>
+      {loading ? <Skeleton h={200} /> : (
+        <Card style={{padding:0,overflow:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:640}}>
+            <thead>
+              <tr style={{background:'var(--muted)',color:'var(--text-dim)',fontSize:11,textTransform:'uppercase'}}>
+                {['When','Action','Actor','Amount','Detail'].map(h=>(
+                  <th key={h} style={{textAlign:'left',padding:'10px 14px'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id} style={{borderTop:'1px solid var(--border)'}}>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{new Date(r.created_at).toLocaleString()}</td>
+                  <td style={{padding:'10px 14px'}}><Badge label={r.action} color={actionColor(r.action)} /></td>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)'}}>{r.actor||'system'}</td>
+                  <td style={{padding:'10px 14px',color:r.amount?'var(--gold)':'var(--text-dim)'}}>{r.amount?'$'+parseFloat(r.amount).toFixed(2):'—'}</td>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)'}}>{r.detail}</td>
+                </tr>
+              ))}
+              {!rows.length && <tr><td colSpan={5} style={{padding:'24px 14px',color:'var(--text-dim)',textAlign:'center'}}>No audit entries yet</td></tr>}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// Tab groups for the two-level nav. Each entry maps a group label to its tabs.
+const TAB_GROUPS = [
+  { group: 'Insights',   tabs: ['Dashboard','P&L','Budget','Reports'] },
+  { group: 'Money In',   tabs: ['Bonds','Payments','Trust Account','Remittances','Carriers'] },
+  { group: 'Money Out',  tabs: ['Expenses','Bills','Recurring'] },
+  { group: 'Compliance', tabs: ['Tax','1099','Alerts','Audit'] },
+];
+
 export default function Bookkeeping() {
-  const TABS = ['Dashboard','Bonds','Payments','Trust Account','Remittances','Carriers','Expenses','Recurring','Bills','Budget','P&L','Tax','1099','Reports','Alerts'];
   const [tab, setTab] = useState('Dashboard');
   const [carriers, setCarriers] = useState([]);
+  // Status filter handed to BondsTab when the user drills in from the dashboard.
+  const [bondDrill, setBondDrill] = useState(undefined);
 
   const loadCarriers = useCallback(() => {
     fetch(`${API}/carriers`).then(r=>r.json()).then(setCarriers).catch(()=>{});
@@ -2040,16 +2262,43 @@ export default function Bookkeeping() {
 
   useEffect(() => { loadCarriers(); }, [loadCarriers]);
 
+  const activeGroup = TAB_GROUPS.find(g => g.tabs.includes(tab))?.group;
+
+  const goTab = (t) => { if (t !== 'Bonds') setBondDrill(undefined); setTab(t); };
+  const drillToBonds = (status) => { setBondDrill(status); setTab('Bonds'); };
+
   return (
     <div style={{padding:24,maxWidth:1400,margin:'0 auto'}}>
-      <div style={{marginBottom:24}}>
+      <style>{`@keyframes bkshimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+      <div style={{marginBottom:20}}>
         <h1 style={{margin:'0 0 4px',fontSize:22,fontWeight:800}}>Bookkeeping</h1>
         <div style={{fontSize:13,color:'var(--text-dim)'}}>Bond premiums · commissions · carrier remittances · trust ledger</div>
       </div>
-      <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
-        {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            style={{background:'none',border:'none',padding:'10px 14px',cursor:'pointer',
+
+      {/* Level 1: group tabs */}
+      <div style={{display:'flex',gap:4,marginBottom:0,flexWrap:'wrap'}}>
+        {TAB_GROUPS.map(g => {
+          const on = g.group === activeGroup;
+          return (
+            <button key={g.group} onClick={() => goTab(g.tabs[0])}
+              style={{background:on?'var(--surface)':'transparent',
+                border:'1px solid '+(on?'var(--border)':'transparent'),
+                borderBottom:'none',borderRadius:'8px 8px 0 0',padding:'9px 18px',cursor:'pointer',
+                fontSize:13,fontWeight:on?700:500,color:on?'var(--gold)':'var(--text-dim)',
+                transition:'all 0.15s',whiteSpace:'nowrap'}}>
+              {g.group}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Level 2: sub-tabs within the active group */}
+      <div style={{display:'flex',gap:0,marginBottom:24,borderTop:'1px solid var(--border)',
+        borderBottom:'1px solid var(--border)',background:'var(--surface)',
+        borderRadius:'0 8px 8px 8px',padding:'0 8px',flexWrap:'wrap'}}>
+        {(TAB_GROUPS.find(g => g.group === activeGroup)?.tabs || []).map(t => (
+          <button key={t} onClick={() => goTab(t)}
+            style={{background:'none',border:'none',padding:'11px 14px',cursor:'pointer',
               fontSize:13,fontWeight:tab===t?700:400,
               color:tab===t?'var(--gold)':'var(--text-dim)',
               borderBottom:tab===t?'2px solid var(--gold)':'2px solid transparent',
@@ -2058,8 +2307,9 @@ export default function Bookkeeping() {
           </button>
         ))}
       </div>
-      {tab==='Dashboard'     && <DashboardTab />}
-      {tab==='Bonds'         && <BondsTab carriers={carriers} />}
+
+      {tab==='Dashboard'     && <DashboardTab onDrill={drillToBonds} />}
+      {tab==='Bonds'         && <BondsTab carriers={carriers} initialStatus={bondDrill} />}
       {tab==='Payments'      && <PaymentsTab />}
       {tab==='Trust Account' && <TrustTab />}
       {tab==='Remittances'   && <RemittancesTab carriers={carriers} />}
@@ -2073,6 +2323,7 @@ export default function Bookkeeping() {
       {tab==='Recurring'     && <RecurringTab />}
       {tab==='Budget'        && <BudgetTab />}
       {tab==='1099'          && <Tab1099 />}
+      {tab==='Audit'         && <AuditTab />}
     </div>
   );
 }

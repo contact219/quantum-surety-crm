@@ -6,6 +6,19 @@ export const bookkeepingRouter = express.Router();
 
 const FROM = 'Quantum Surety <nice.shotwell-sparks@quantumsurety.bond>';
 
+// Append a row to the money-mutation audit log. Best-effort: never blocks the
+// primary transaction. Pass an existing client to enroll in its transaction,
+// or omit to write on the shared pool.
+async function logAudit(db, { action, entity, entity_id, actor, amount, detail }) {
+  try {
+    await (db || pool).query(
+      `INSERT INTO bk_audit_log (action, entity, entity_id, actor, amount, detail)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [action, entity, entity_id || null, actor || 'system', amount ?? null, detail || null]
+    );
+  } catch (e) { console.error('[bk audit]', e.message); }
+}
+
 // ─── CARRIERS ─────────────────────────────────────────────────────────────────
 
 bookkeepingRouter.get('/carriers', async (req, res) => {
@@ -225,6 +238,12 @@ bookkeepingRouter.put('/payments/:id/collect', async (req, res) => {
       VALUES ($1,$2,$3,CURRENT_DATE)
     `, [bond.id, payment.id, commAmt]);
 
+    await logAudit(client, {
+      action: 'payment.collect', entity: 'payment', entity_id: payment.id,
+      actor: req.headers['x-user'] || req.body?.actor, amount: premiumAmt,
+      detail: `Collected $${premiumAmt.toFixed(2)} for ${bond.insured_name} (bond ${bond.bond_number || bond.id}); commission $${commAmt.toFixed(2)}`,
+    });
+
     await client.query('COMMIT');
     res.json({ ok: true, trust_balance: balAfterComm, commission: commAmt });
   } catch (e) {
@@ -357,6 +376,13 @@ bookkeepingRouter.put('/remittances/:id/status', async (req, res) => {
       }
     }
 
+    await logAudit(client, {
+      action: `remittance.${status}`, entity: 'remittance', entity_id: rem.id,
+      actor: req.headers['x-user'] || req.body?.actor,
+      amount: status === 'sent' ? parseFloat(rem.total_remitted) : null,
+      detail: `Remittance #${rem.id} → ${status} (carrier #${rem.carrier_id}, ${rem.period_start}–${rem.period_end})`,
+    });
+
     await client.query('COMMIT');
     res.json(rem);
   } catch (e) {
@@ -388,12 +414,100 @@ bookkeepingRouter.get('/trust', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Trust reconciliation: current trust balance vs. what is actually owed to
+// carriers (collected premium not yet remitted, minus commission retained).
+bookkeepingRouter.get('/trust/reconciliation', async (req, res) => {
+  try {
+    const [bal, owed, pendingRem] = await Promise.all([
+      pool.query(`SELECT running_balance FROM bk_trust_account ORDER BY id DESC LIMIT 1`),
+      // Premium collected but not yet covered by a sent remittance, net of commission.
+      pool.query(`
+        SELECT
+          COALESCE(SUM(py.amount),0)                         AS premium_collected,
+          COALESCE(SUM(b.commission_amt),0)                  AS commission_retained,
+          COALESCE(SUM(py.amount - b.commission_amt),0)      AS net_owed_carriers,
+          COUNT(*)                                           AS payment_count
+        FROM bk_bond_payments py
+        JOIN bk_bonds b ON b.id = py.bond_id
+        WHERE py.status = 'collected'
+          AND NOT EXISTS (
+            SELECT 1 FROM bk_carrier_remittances r
+            WHERE r.status IN ('sent','confirmed')
+              AND py.collected_at <= r.sent_at
+              AND b.carrier_id = r.carrier_id
+          )
+      `),
+      pool.query(`
+        SELECT COALESCE(SUM(total_remitted),0) AS amount, COUNT(*) AS count
+        FROM bk_carrier_remittances WHERE status='pending'
+      `),
+    ]);
+    const trustBalance = parseFloat(bal.rows[0]?.running_balance || 0);
+    const netOwed = parseFloat(owed.rows[0]?.net_owed_carriers || 0);
+    const pendingAmt = parseFloat(pendingRem.rows[0]?.amount || 0);
+    res.json({
+      trust_balance: trustBalance,
+      premium_collected_unremitted: parseFloat(owed.rows[0]?.premium_collected || 0),
+      commission_retained: parseFloat(owed.rows[0]?.commission_retained || 0),
+      net_owed_carriers: netOwed,
+      pending_remittances: pendingAmt,
+      pending_remittance_count: parseInt(pendingRem.rows[0]?.count || 0),
+      // Positive variance = trust holds more than is owed (healthy buffer);
+      // negative = shortfall (trust under-funded vs. obligations).
+      variance: +(trustBalance - netOwed).toFixed(2),
+      reconciled: Math.abs(trustBalance - netOwed) < 0.01,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Payment aging: pending (uncollected) payments bucketed by days outstanding.
+bookkeepingRouter.get('/payments/aging', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      WITH aged AS (
+        SELECT py.id, py.amount,
+          GREATEST(0, EXTRACT(DAY FROM NOW() - COALESCE(py.payment_date::timestamp, py.created_at))) AS days
+        FROM bk_bond_payments py
+        WHERE py.status = 'pending'
+      )
+      SELECT
+        CASE
+          WHEN days <= 30 THEN '0-30'
+          WHEN days <= 60 THEN '31-60'
+          WHEN days <= 90 THEN '61-90'
+          ELSE '90+'
+        END AS bucket,
+        COUNT(*) AS count,
+        COALESCE(SUM(amount),0) AS total
+      FROM aged GROUP BY 1
+    `);
+    const order = ['0-30','31-60','61-90','90+'];
+    const map = Object.fromEntries(rows.map(r => [r.bucket, r]));
+    res.json(order.map(b => ({
+      bucket: b,
+      count: parseInt(map[b]?.count || 0),
+      total: parseFloat(map[b]?.total || 0),
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Money-mutation audit log (most recent first).
+bookkeepingRouter.get('/audit', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM bk_audit_log ORDER BY id DESC LIMIT $1`, [limit]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
 bookkeepingRouter.get('/dashboard', async (req, res) => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   try {
-    const [kpi, trustBal, recentBonds, trend, byCarrier] = await Promise.all([
+    const [kpi, trustBal, recentBonds, trend, byCarrier, byStatus] = await Promise.all([
       pool.query(`
         SELECT
           COALESCE(SUM(CASE WHEN to_char(b.effective_date,'YYYY-MM')=$1 AND b.status='issued'
@@ -408,7 +522,10 @@ bookkeepingRouter.get('/dashboard', async (req, res) => {
           COUNT(DISTINCT CASE WHEN b.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE+45
             AND b.status='issued'
             AND NOT EXISTS (SELECT 1 FROM bk_renewal_alerts ra WHERE ra.bond_id=b.id AND ra.status='renewed')
-            THEN b.id END) as renewals_due
+            THEN b.id END) as renewals_due,
+          COALESCE(SUM(CASE WHEN b.status='saved' THEN b.premium END), 0) as pipeline_premium,
+          COALESCE(SUM(CASE WHEN b.status='saved' THEN b.commission_amt END), 0) as pipeline_commission,
+          COUNT(DISTINCT CASE WHEN b.status='saved' THEN b.id END) as pipeline_count
         FROM bk_bonds b
       `, [month]),
       pool.query(`SELECT running_balance FROM bk_trust_account ORDER BY id DESC LIMIT 1`),
@@ -421,6 +538,7 @@ bookkeepingRouter.get('/dashboard', async (req, res) => {
           SUM(b.premium) as premium, SUM(b.commission_amt) as commission, COUNT(*) as count
         FROM bk_bonds b
         WHERE b.effective_date >= CURRENT_DATE - INTERVAL '6 months'
+          AND b.status IN ('issued','expired')
         GROUP BY 1 ORDER BY 1
       `),
       pool.query(`
@@ -429,8 +547,15 @@ bookkeepingRouter.get('/dashboard', async (req, res) => {
           SUM(b.commission_amt) as total_commission
         FROM bk_bonds b JOIN bk_carriers c ON c.id = b.carrier_id
         WHERE to_char(b.effective_date,'YYYY-MM') = $1
+          AND b.status IN ('issued','expired')
         GROUP BY c.id, c.name ORDER BY total_premium DESC
       `, [month]),
+      pool.query(`
+        SELECT status, COUNT(*) AS count,
+          COALESCE(SUM(premium),0) AS total_premium,
+          COALESCE(SUM(commission_amt),0) AS total_commission
+        FROM bk_bonds GROUP BY status ORDER BY count DESC
+      `),
     ]);
 
     res.json({
@@ -439,6 +564,7 @@ bookkeepingRouter.get('/dashboard', async (req, res) => {
       recent_bonds: recentBonds.rows,
       trend: trend.rows,
       by_carrier: byCarrier.rows,
+      by_status: byStatus.rows,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -908,6 +1034,39 @@ bookkeepingRouter.get('/export/tax-packet', async (req, res) => {
     res.setHeader('Content-Disposition',`attachment; filename="quantum_surety_tax_packet_${year}.csv"`);
     res.send(out);
   } catch(e){ res.status(500).json({error:e.message}); }
+});
+
+// KPI cache endpoint — reads latest daily snapshot for CRM Dashboard
+bookkeepingRouter.get('/kpi', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM bk_kpi_cache ORDER BY snapshot_date DESC LIMIT 1'
+    );
+    if (!rows.length) {
+      // No cache yet — compute live
+      const year = new Date().getFullYear().toString();
+      const month = new Date().toISOString().slice(0,7);
+      const [mtd, ytd, active, expiring, bills] = await Promise.all([
+        pool.query('SELECT COUNT(*) AS bonds, COALESCE(SUM(commission_amt),0) AS commission, COALESCE(SUM(premium),0) AS premium FROM bk_bonds WHERE to_char(effective_date,$1) AND status=$2', [month, 'issued']),
+        pool.query('SELECT COUNT(*) AS bonds, COALESCE(SUM(commission_amt),0) AS commission FROM bk_bonds WHERE EXTRACT(YEAR FROM effective_date)=$1 AND status=$2', [year, 'issued']),
+        pool.query('SELECT COUNT(*) AS count FROM bk_bonds WHERE status=$1', ['issued']),
+        pool.query('SELECT COUNT(*) AS count FROM bk_bonds WHERE status=$1 AND expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE+30', ['issued']),
+        pool.query('SELECT COALESCE(SUM(amount),0) AS total FROM bk_bills WHERE status=$1', ['unpaid']),
+      ]);
+      return res.json({
+        snapshot_date: new Date().toISOString().slice(0,10),
+        active_bonds: parseInt(active.rows[0].count),
+        mtd_commission: parseFloat(mtd.rows[0].commission),
+        ytd_commission: parseFloat(ytd.rows[0].commission),
+        mtd_premium: parseFloat(mtd.rows[0].premium),
+        mtd_bonds: parseInt(mtd.rows[0].bonds),
+        ytd_bonds: parseInt(ytd.rows[0].bonds),
+        expiring_30d: parseInt(expiring.rows[0].count),
+        unpaid_bills: parseFloat(bills.rows[0].total),
+      });
+    }
+    res.json(rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Auto-run all recurring expenses due today
