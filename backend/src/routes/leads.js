@@ -17,6 +17,9 @@ const BOND_LABELS = {
   'credit-access-business': 'Texas Credit Access Business Bond',
   'collection-agency': 'Texas Collection Agency Bond',
   'property-tax-consultant': 'Texas Property Tax Consultant Bond',
+  title: 'Texas Vehicle Title Bond',
+  'bonded-title': 'Texas Vehicle Title Bond',
+  'vehicle-title': 'Texas Vehicle Title Bond',
 };
 function bondLabel(raw) {
   if (!raw) return 'Unknown';
@@ -78,12 +81,19 @@ leadsRouter.get('/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE status='sold') AS sold_count,
         COUNT(*) FILTER (WHERE status='no_follow_up') AS no_follow_up_count,
         COUNT(*) AS total,
-        COALESCE(SUM(sale_amount) FILTER (WHERE status='sold'), 0) AS revenue,
-        COUNT(*) FILTER (WHERE lead_time >= date_trunc('day', NOW() AT TIME ZONE 'America/Chicago')) AS today_new,
-        COUNT(*) FILTER (WHERE lead_time >= date_trunc('week', NOW() AT TIME ZONE 'America/Chicago')) AS week_new,
-        COALESCE(SUM(sale_amount) FILTER (
-          WHERE status='sold' AND lead_time >= date_trunc('month', NOW() AT TIME ZONE 'America/Chicago')
-        ), 0) AS month_revenue
+        -- Revenue comes from revenue_events (ONE row per bond, deduped on bond_no),
+        -- never from leads.sale_amount. rli_revenue_sync.py marks a lead sold by
+        -- matching a bond on email OR phone OR exact name with nothing limiting one
+        -- bond to one lead, and writes the FULL commission onto every match. One
+        -- $27.50 notary bond matched 9 leads and was credited $272.56; across the book
+        -- that inflated revenue from $2,234.60 to $3,316.21, 48% high. sold_count below
+        -- is still a LEAD count and is correct as attribution.
+        (SELECT COALESCE(SUM(commission), 0) FROM revenue_events) AS revenue,
+        COUNT(*) FILTER (WHERE COALESCE(lead_time, created_at) >= date_trunc('day', NOW() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago') AS today_new,
+        COUNT(*) FILTER (WHERE COALESCE(lead_time, created_at) >= date_trunc('week', NOW() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago') AS week_new,
+        (SELECT COALESCE(SUM(commission), 0) FROM revenue_events
+          WHERE effective_date >= date_trunc('month', NOW() AT TIME ZONE 'America/Chicago')::date
+        ) AS month_revenue
       FROM leads
     `);
     res.json(result.rows[0]);

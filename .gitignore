@@ -3,4 +3,5 @@ node_modules/
 frontend/dist/
 */node_modules/
 *.cjs
-*.bak-*
+*.bak*
+.htpasswd

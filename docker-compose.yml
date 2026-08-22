@@ -8,8 +8,9 @@ services:
       - DATABASE_URL=postgresql://quantum_user:QsCRMV8yNgKOoaNPu67JF!@host.docker.internal:5433/quantum_surety
       - RESEND_API_KEY=${RESEND_API_KEY}
       - PORT=4000
+      - CRON_SECRET=${CRON_SECRET}
     ports:
-      - "4001:4000"
+      - "127.0.0.1:4001:4000"
     env_file:
       - .env
     extra_hosts:
@@ -19,6 +20,6 @@ services:
     container_name: qs-crm-frontend
     restart: unless-stopped
     ports:
-      - "8095:80"
+      - "127.0.0.1:8095:80"
     depends_on:
       - crm-backend
