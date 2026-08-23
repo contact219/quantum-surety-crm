@@ -633,6 +633,18 @@ bookkeepingRouter.post('/bonds/upsert-from-scraper', async (req, res) => {
       `, [b.bond_number, b.carrier_id, b.insured_name, b.insured_email||null,
           b.bond_type, b.bond_amount, b.premium, b.commission_rate||0.20,
           b.effective_date, b.expiration_date, b.status||'issued']);
+      // RLI direct-bill bonds never pass through payment collection, so post
+      // commission to the ledger here the first time a bond shows as issued.
+      if ((b.status||'issued') === 'issued') {
+        await pool.query(`
+          INSERT INTO bk_commission_ledger (bond_id, amount, entry_date, notes)
+          SELECT id, commission_amt, COALESCE(effective_date, CURRENT_DATE),
+                 'RLI direct-bill commission (auto-posted from scraper sync)'
+          FROM bk_bonds
+          WHERE bond_number = $1 AND status = 'issued' AND commission_amt IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM bk_commission_ledger cl WHERE cl.bond_id = bk_bonds.id)
+        `, [b.bond_number]);
+      }
       upserted++;
     } catch (e) {
       await pool.query(`
@@ -1047,8 +1059,8 @@ bookkeepingRouter.get('/kpi', async (req, res) => {
       const year = new Date().getFullYear().toString();
       const month = new Date().toISOString().slice(0,7);
       const [mtd, ytd, active, expiring, bills] = await Promise.all([
-        pool.query('SELECT COUNT(*) AS bonds, COALESCE(SUM(commission_amt),0) AS commission, COALESCE(SUM(premium),0) AS premium FROM bk_bonds WHERE to_char(effective_date,$1) AND status=$2', [month, 'issued']),
-        pool.query('SELECT COUNT(*) AS bonds, COALESCE(SUM(commission_amt),0) AS commission FROM bk_bonds WHERE EXTRACT(YEAR FROM effective_date)=$1 AND status=$2', [year, 'issued']),
+        pool.query("SELECT COUNT(*) AS bonds, COALESCE(SUM(commission_amt),0) AS commission, COALESCE(SUM(premium),0) AS premium FROM bk_bonds WHERE to_char(created_at,'YYYY-MM')=$1 AND status=$2", [month, 'issued']),
+        pool.query('SELECT COUNT(*) AS bonds, COALESCE(SUM(commission_amt),0) AS commission FROM bk_bonds WHERE EXTRACT(YEAR FROM created_at)=$1 AND status=$2', [year, 'issued']),
         pool.query('SELECT COUNT(*) AS count FROM bk_bonds WHERE status=$1', ['issued']),
         pool.query('SELECT COUNT(*) AS count FROM bk_bonds WHERE status=$1 AND expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE+30', ['issued']),
         pool.query('SELECT COALESCE(SUM(amount),0) AS total FROM bk_bills WHERE status=$1', ['unpaid']),
