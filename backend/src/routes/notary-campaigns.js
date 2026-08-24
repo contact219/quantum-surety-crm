@@ -56,7 +56,7 @@ notaryCampaignsRouter.post('/count', async (req, res) => {
     const result = await db.execute(sql`
       SELECT COUNT(*) as count FROM notaries
       WHERE email != '' AND email IS NOT NULL
-      AND email NOT IN (SELECT email FROM unsubscribes)
+      AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
       ${suretyCond} ${cityCond} ${expCond} ${skipSentCond} ${cooldownCond}
     `);
     res.json({ count: parseInt(result.rows[0].count) });
@@ -78,7 +78,7 @@ notaryCampaignsRouter.post('/send', async (req, res) => {
       SELECT id, first_name, last_name, email, expire_date, surety_company
       FROM notaries
       WHERE email != '' AND email IS NOT NULL
-      AND email NOT IN (SELECT email FROM unsubscribes)
+      AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
       ${suretyCond} ${cityCond} ${expCond} ${skipSentCond} ${cooldownCond}
       LIMIT 5000
     `);
@@ -137,16 +137,21 @@ notaryCampaignsRouter.post('/send-selected', async (req, res) => {
 
   try {
     const rows = await db.execute(sql`
-      SELECT id, first_name, last_name, email, expire_date, surety_company
+      SELECT id, first_name, last_name, email, expire_date, surety_company,
+             (LOWER(email) IN (SELECT LOWER(email) FROM unsubscribes)) AS unsubscribed
       FROM notaries
       WHERE id IN (${inClause})
       AND email != '' AND email IS NOT NULL
     `);
 
+    // Honor unsubscribes even on manual selection
+    const recipients = rows.rows.filter(c => !c.unsubscribed);
+    const excludedUnsubscribed = rows.rows.length - recipients.length;
+
     let sent = 0, failed = 0;
     const name = campaign_name || subject;
 
-    for (const c of rows.rows) {
+    for (const c of recipients) {
       const expDate = c.expire_date
         ? new Date(c.expire_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
         : '';
@@ -178,7 +183,7 @@ notaryCampaignsRouter.post('/send-selected', async (req, res) => {
       }
     }
 
-    res.json({ ok: true, sent, failed, total: rows.rows.length });
+    res.json({ ok: true, sent, failed, total: recipients.length, excluded_unsubscribed: excludedUnsubscribed });
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 

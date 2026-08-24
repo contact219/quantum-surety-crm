@@ -132,9 +132,10 @@ bkAiRouter.post('/ai/narrative', async (req, res) => {
 
     const [revRows, expRows, bondCount, unpaidBills] = await Promise.all([
       pool.query(`
-        SELECT bond_type, SUM(premium * commission_rate) AS commission
+        SELECT bond_type, SUM(commission_amt) AS commission
         FROM bk_bonds
         WHERE DATE_TRUNC('month', effective_date) = $1::date
+          AND status IN ('issued','expired')
         GROUP BY bond_type ORDER BY commission DESC
       `, [`${month}-01`]),
       pool.query(`
@@ -301,9 +302,9 @@ bkAiRouter.get('/ai/tax-estimate', async (req, res) => {
         COALESCE(SUM(exp),0) AS expenses
       FROM (
         SELECT DATE_TRUNC('quarter', effective_date) AS q,
-          SUM(premium * commission_rate) AS rev, 0 AS exp
+          SUM(commission_amt) AS rev, 0 AS exp
         FROM bk_bonds
-        WHERE EXTRACT(YEAR FROM effective_date) = $1 AND status='issued'
+        WHERE EXTRACT(YEAR FROM effective_date) = $1 AND status IN ('issued','expired')
         GROUP BY DATE_TRUNC('quarter', effective_date)
         UNION ALL
         SELECT DATE_TRUNC('quarter', expense_date) AS q,
@@ -337,14 +338,16 @@ bkAiRouter.get('/ai/tax-estimate', async (req, res) => {
     const STANDARD_DEDUCTION = 14600;
     const taxableIncome = Math.max(0, ytdNet - seDeduction - STANDARD_DEDUCTION);
 
-    // 2025 single filer brackets
+    // 2025 single filer brackets (complete table through 37%)
     function calcIncomeTax(income) {
       const brackets = [
         { limit: 11925,  rate: 0.10 },
         { limit: 48475,  rate: 0.12 },
         { limit: 103350, rate: 0.22 },
         { limit: 197300, rate: 0.24 },
-        { limit: Infinity, rate: 0.32 },
+        { limit: 250525, rate: 0.32 },
+        { limit: 626350, rate: 0.35 },
+        { limit: Infinity, rate: 0.37 },
       ];
       let tax = 0, prev = 0;
       for (const { limit, rate } of brackets) {

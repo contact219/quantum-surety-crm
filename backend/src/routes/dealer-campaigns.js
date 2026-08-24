@@ -5,6 +5,14 @@ import { sql } from 'drizzle-orm';
 
 export const dealerCampaignsRouter = Router();
 
+const APP_URL = process.env.APP_URL || 'https://quantumsurety.bond';
+const COOLDOWN_DAYS = 60;
+
+// Same footer block notary emails use (appended when the template has no {{unsubscribe_url}})
+const UNSUB_FOOTER = `
+<hr style="border:none;border-top:1px solid #eee;margin:32px 0"/>
+<p style="color:#999;font-size:11px;margin:0;font-family:Arial,sans-serif">Quantum Surety LLC · Texas Licensed Surety Agency · <a href="https://quantumsurety.bond" style="color:#C9A84C">quantumsurety.bond</a> · <a href="{{unsubscribe_url}}" style="color:#999">Unsubscribe</a></p>`;
+
 function buildConditions(filters = {}) {
   const searchPct = filters.search ? `%${filters.search}%` : null;
   const cityPct   = filters.city   ? `%${filters.city}%`   : null;
@@ -23,22 +31,30 @@ function buildConditions(filters = {}) {
   else if (filters.expiring === 'expired') expCond = sql`AND license_expiration < CURRENT_DATE`;
   else expCond = sql``;
 
-  return { searchCond, cityCond, countyCond, typeCond, expCond };
+  // Server-side cooldown: never re-email a dealer contacted in the last COOLDOWN_DAYS
+  const cooldownCond = sql`AND id NOT IN (
+    SELECT dealer_id FROM dealer_campaign_sends
+    WHERE dealer_id IS NOT NULL AND status = 'sent'
+    AND sent_at > NOW() - INTERVAL '${sql.raw(String(COOLDOWN_DAYS))} days'
+  )`;
+
+  return { searchCond, cityCond, countyCond, typeCond, expCond, cooldownCond };
 }
 
-function interpolate(template, d, expDate) {
+function interpolate(template, d, expDate, unsubscribeUrl) {
   return template
     .replace(/{{business_name}}/g, d.business_name || '')
     .replace(/{{name}}/g,          d.business_name || '')
     .replace(/{{expire_date}}/g,   expDate)
     .replace(/{{license_type}}/g,  d.license_type || '')
     .replace(/{{county}}/g,        d.county || '')
-    .replace(/{{city}}/g,          d.city || '');
+    .replace(/{{city}}/g,          d.city || '')
+    .replace(/{{unsubscribe_url}}/g, unsubscribeUrl || '');
 }
 
 // Count matching dealers
 dealerCampaignsRouter.post('/count', async (req, res) => {
-  const { searchCond, cityCond, countyCond, typeCond, expCond } = buildConditions(req.body?.filters);
+  const { searchCond, cityCond, countyCond, typeCond, expCond, cooldownCond } = buildConditions(req.body?.filters);
   const skipSentCond = req.body?.skip_sent
     ? sql`AND id NOT IN (SELECT dealer_id FROM dealer_campaign_sends WHERE dealer_id IS NOT NULL AND status = 'sent')`
     : sql``;
@@ -46,8 +62,8 @@ dealerCampaignsRouter.post('/count', async (req, res) => {
     const result = await db.execute(sql`
       SELECT COUNT(*) as count FROM auto_dealers
       WHERE email != '' AND email IS NOT NULL
-      AND email NOT IN (SELECT email FROM unsubscribes)
-      ${searchCond} ${cityCond} ${countyCond} ${typeCond} ${expCond} ${skipSentCond}
+      AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
+      ${searchCond} ${cityCond} ${countyCond} ${typeCond} ${expCond} ${skipSentCond} ${cooldownCond}
     `);
     res.json({ count: parseInt(result.rows[0].count) });
   } catch(err) { res.status(500).json({ error: err.message }); }
@@ -58,7 +74,7 @@ dealerCampaignsRouter.post('/send', async (req, res) => {
   const { subject, body, from_name, from_email, filters, campaign_name, skip_sent } = req.body;
   if (!subject || !body) return res.status(400).json({ error: 'subject and body required' });
 
-  const { searchCond, cityCond, countyCond, typeCond, expCond } = buildConditions(filters);
+  const { searchCond, cityCond, countyCond, typeCond, expCond, cooldownCond } = buildConditions(filters);
   const skipSentCond = skip_sent
     ? sql`AND id NOT IN (SELECT dealer_id FROM dealer_campaign_sends WHERE dealer_id IS NOT NULL AND status = 'sent')`
     : sql``;
@@ -68,8 +84,8 @@ dealerCampaignsRouter.post('/send', async (req, res) => {
       SELECT id, business_name, dba_name, license_type, license_expiration, city, county, email
       FROM auto_dealers
       WHERE email != '' AND email IS NOT NULL
-      AND email NOT IN (SELECT email FROM unsubscribes)
-      ${searchCond} ${cityCond} ${countyCond} ${typeCond} ${expCond} ${skipSentCond}
+      AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
+      ${searchCond} ${cityCond} ${countyCond} ${typeCond} ${expCond} ${skipSentCond} ${cooldownCond}
       LIMIT 5000
     `);
 
@@ -79,18 +95,26 @@ dealerCampaignsRouter.post('/send', async (req, res) => {
     // Return immediately — process in background to avoid proxy timeouts
     res.json({ ok: true, queued: true, total });
 
+    // Ensure every email carries a visible unsubscribe link
+    const bodyTemplate = body.includes('{{unsubscribe_url}}') ? body : body + UNSUB_FOOTER;
+
     (async () => {
       for (const d of rows.rows) {
         const expDate = d.license_expiration
           ? new Date(d.license_expiration).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
           : '';
-        const html = interpolate(body, d, expDate);
-        const subj = interpolate(subject, d, expDate);
+        const unsubscribeUrl = `${APP_URL}/api/unsubscribe?email=${encodeURIComponent(d.email)}`;
+        const html = interpolate(bodyTemplate, d, expDate, unsubscribeUrl);
+        const subj = interpolate(subject, d, expDate, unsubscribeUrl);
 
         try {
           await sendEmail({
             from: `"${(from_name || 'Quantum Surety').replace(/"/g,'')}" <${from_email || 'info@quantumsurety.bond'}>`,
             to: d.email, subject: subj, html,
+            headers: {
+              'List-Unsubscribe': `<${unsubscribeUrl}>`,
+              'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+            },
           });
           await db.execute(sql`
             INSERT INTO dealer_campaign_sends (dealer_id, email, campaign_name, subject, status)

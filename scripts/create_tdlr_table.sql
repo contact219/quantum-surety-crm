@@ -21,3 +21,21 @@ CREATE INDEX IF NOT EXISTS idx_tdlr_expire ON tdlr_licenses (expire_date);
 CREATE INDEX IF NOT EXISTS idx_tdlr_license_type ON tdlr_licenses (license_type);
 CREATE INDEX IF NOT EXISTS idx_tdlr_county ON tdlr_licenses (business_county);
 CREATE INDEX IF NOT EXISTS idx_tdlr_business_name ON tdlr_licenses (business_name);
+
+-- Sync support (scripts/sync_tdlr.py). Additive and safe on the live DB;
+-- sync_tdlr.py also runs these itself at startup (self-migrating).
+ALTER TABLE tdlr_licenses ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP;
+ALTER TABLE tdlr_licenses ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+
+CREATE TABLE IF NOT EXISTS tdlr_sync_log (
+  id           SERIAL PRIMARY KEY,
+  started_at   TIMESTAMP,
+  finished_at  TIMESTAMP,
+  source_count INT,
+  upserted     INT,
+  deactivated  INT,
+  reactivated  INT,
+  rejected     INT,
+  status       TEXT,
+  error        TEXT
+);

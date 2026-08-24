@@ -1,4 +1,4 @@
-import React,{useEffect,useState,useCallback} from 'react';
+import React,{useEffect,useState,useCallback,useRef} from 'react';
 import {Search,MapPin,ChevronLeft,ChevronRight,X,Download,RefreshCw,Phone} from 'lucide-react';
 import {apiFetch} from '../auth.js';
 
@@ -30,31 +30,31 @@ function daysUntil(d) {
   return Math.floor((new Date(d) - new Date()) / 86400000);
 }
 
-function exportCSV(rows) {
-  const header = ['License #','License Type','Subtype','Business Name','Owner','County','City','State','Zip','Phone','Owner Phone','Expires'];
-  const data = rows.map(r=>[
-    r.license_number, r.license_type, r.license_subtype||'',
-    r.business_name||'', r.owner_name||'', r.business_county||'',
-    r.business_city||'', r.business_state||'', r.business_zip||'',
-    r.business_phone||'', r.owner_phone||'', fmtDate(r.expire_date),
-  ]);
-  const csv = [header,...data].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv],{type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href=url; a.download='tdlr-licenses-'+new Date().toISOString().split('T')[0]+'.csv';
-  a.click(); URL.revokeObjectURL(url);
+// A phone is displayable only if it's a non-empty string that isn't the literal text "NULL"
+// (bad rows from the legacy loader stored the string NULL, which rendered as tel:NULL links).
+function phoneOk(p) {
+  if (!p) return false;
+  const t = String(p).trim();
+  return t !== '' && t.toUpperCase() !== 'NULL';
 }
 
-const BLANK_FILTERS = {search:'',county:'',license_type:'',expiring:'90',has_phone:''};
+function isRemoved(r) {
+  return r.is_active === false || r.is_active === 0 || r.is_active === 'f' || r.is_active === 'false' || !!r.removed_at;
+}
+
+const BLANK_FILTERS = {search:'',county:'',license_type:'',expiring:'90',has_phone:'',include_inactive:''};
 
 export default function TDLRLicenses() {
   const [stats,setStats]   = useState(null);
+  const [meta,setMeta]     = useState(undefined); // undefined = loading, null = fetch failed
   const [rows,setRows]     = useState([]);
   const [total,setTotal]   = useState(0);
   const [pages,setPages]   = useState(1);
   const [page,setPage]     = useState(1);
   const [loading,setLoading] = useState(false);
+  const [error,setError]     = useState(null);
+  const [exporting,setExporting] = useState(false);
+  const reqIdRef = useRef(0); // out-of-order response guard for loadRows
   const [filters,setFilters] = useState(BLANK_FILTERS);
   const [pending,setPending] = useState(BLANK_FILTERS);
   const [selected,setSelected] = useState(null);
@@ -64,26 +64,101 @@ export default function TDLRLicenses() {
   const loadStats = () =>
     apiFetch('/api/tdlr/stats').then(safeJson).then(setStats).catch(()=>{});
 
+  const loadMeta = () =>
+    apiFetch('/api/tdlr/meta').then(safeJson).then(setMeta).catch(()=>setMeta(null));
+
   const loadRows = useCallback(()=>{
-    setLoading(true);
+    setLoading(true); setError(null);
+    const reqId = ++reqIdRef.current; // ignore responses that arrive out of order
     const p = new URLSearchParams({page, limit:50, ...filters});
     apiFetch(`/api/tdlr?${p}`).then(safeJson).then(j=>{
+      if (reqId !== reqIdRef.current) return;
       setRows(j.data||[]); setTotal(j.total||0); setPages(j.pages||1);
-    }).catch(()=>{}).finally(()=>setLoading(false));
+    }).catch(e=>{
+      if (reqId === reqIdRef.current) setError(e.message||'Failed to load licenses');
+    }).finally(()=>{
+      if (reqId === reqIdRef.current) setLoading(false);
+    });
   },[page, filters]);
 
-  useEffect(()=>{ loadStats(); },[]);
+  useEffect(()=>{ loadStats(); loadMeta(); },[]);
   useEffect(()=>{ loadRows(); },[loadRows]);
   useEffect(()=>{ setPage(1); },[filters]);
 
   const applyFilters = () => { setFilters({...pending}); setPage(1); };
   const resetFilters = () => { setPending(BLANK_FILTERS); setFilters(BLANK_FILTERS); setPage(1); };
+  const toggleInactive = () => {
+    const v = filters.include_inactive === 'true' ? '' : 'true';
+    setPending(f=>({...f,include_inactive:v}));
+    setFilters(f=>({...f,include_inactive:v}));
+    setPage(1);
+  };
+
+  // Server-side full export of the CURRENT filter set (not just the visible
+  // page). Fetched with the Authorization header via apiFetch, then saved
+  // through a blob object URL — no navigation, no token in the URL (a JWT in
+  // a query string would leak into browser history and server logs).
+  const exportCsv = async () => {
+    if (!total || exporting) return;
+    setExporting(true);
+    try {
+      const p = new URLSearchParams();
+      Object.entries(filters).forEach(([k,v])=>{ if(v) p.set(k,v); });
+      const r = await apiFetch(`/api/tdlr/export.csv?${p}`);
+      if (!r.ok) throw new Error(`Export failed (${r.status})`);
+      const blob = await r.blob();
+      const m = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition')||'');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = m ? m[1] : 'tdlr_licenses.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e.message||'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Staleness banner derivation — matches the actual /api/tdlr/meta contract:
+  // { last_sync: <latest tdlr_sync_log row|null>, last_updated_at,
+  //   total_count, active_count, inactive_count, freshness_days }
+  const lastSync = meta ? (meta.last_sync?.finished_at ?? meta.last_updated_at ?? null) : null;
+  const syncDays = lastSync ? Math.floor((Date.now() - new Date(lastSync).getTime())/86400000) : null;
+  const metaTotal   = meta?.total_count    ?? null;
+  const metaActive  = meta?.active_count   ?? null;
+  const metaRemoved = meta?.inactive_count ?? null;
+  const sync = lastSync == null
+    ? {color:'#6B6B8A', label:'SYNC TRACKING NOT AVAILABLE', detail:'No TDLR sync has been recorded yet — data age unknown.'}
+    : syncDays <= 8
+    ? {color:'#4CC97A', label:'DATA CURRENT', detail:`Last TDLR sync ${fmtDate(lastSync)} (${syncDays===0?'today':syncDays+'d ago'})`}
+    : syncDays <= 31
+    ? {color:'#C9A84C', label:'DATA AGING', detail:`Last TDLR sync ${fmtDate(lastSync)} (${syncDays}d ago)`}
+    : {color:'#ef4444', label:'DATA STALE', detail:`Last TDLR sync ${fmtDate(lastSync)} (${syncDays}d ago)`};
+  const syncCounts = [
+    metaTotal   != null && `${parseInt(metaTotal).toLocaleString()} records`,
+    metaActive  != null && `${parseInt(metaActive).toLocaleString()} active`,
+    metaRemoved != null && `${parseInt(metaRemoved).toLocaleString()} removed`,
+  ].filter(Boolean).join(' · ');
 
   const inputStyle = {paddingTop:6,paddingBottom:6,paddingRight:10,borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none'};
 
   return (
     <div style={{display:'flex',height:'100%',overflow:'hidden'}}>
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+
+        {/* Sync staleness banner */}
+        {meta!==undefined&&(
+          <div style={{padding:'8px 24px',borderBottom:'1px solid var(--border)',background:`${sync.color}14`,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <div style={{width:8,height:8,borderRadius:'50%',background:sync.color,flexShrink:0}}/>
+            <span style={{fontSize:10,fontFamily:'monospace',letterSpacing:2,color:sync.color,fontWeight:700}}>{sync.label}</span>
+            <span style={{fontSize:11,color:'var(--text-dim)'}}>{sync.detail}</span>
+            {syncCounts&&<span style={{fontSize:11,fontFamily:'monospace',color:'var(--text-dim)',marginLeft:'auto'}}>{syncCounts}</span>}
+          </div>
+        )}
 
         {/* Header */}
         <div style={{padding:'24px 24px 16px',borderBottom:'1px solid var(--border)'}}>
@@ -136,6 +211,11 @@ export default function TDLRLicenses() {
               <option value=''>All Contacts</option>
               <option value='true'>Has Phone</option>
             </select>
+            <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'var(--text-dim)',cursor:'pointer',userSelect:'none'}}>
+              <input type="checkbox" checked={filters.include_inactive==='true'} onChange={toggleInactive}
+                style={{accentColor:'var(--gold)',cursor:'pointer'}}/>
+              Include removed
+            </label>
             <button onClick={applyFilters}
               style={{padding:'6px 16px',borderRadius:8,background:'var(--gold)',color:'#000',fontSize:12,fontWeight:700,border:'none',cursor:'pointer'}}>
               Search
@@ -144,11 +224,12 @@ export default function TDLRLicenses() {
               style={{padding:'6px 12px',borderRadius:8,background:'var(--muted)',color:'var(--text-dim)',fontSize:12,border:'none',cursor:'pointer'}}>
               Reset
             </button>
-            <button onClick={()=>exportCSV(rows)} disabled={!rows.length}
-              style={{padding:'6px 10px',borderRadius:8,background:'var(--muted)',border:'none',cursor:'pointer',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4,opacity:rows.length?1:0.4}}>
-              <Download size={12}/><span style={{fontSize:12}}>CSV</span>
+            <button onClick={exportCsv} disabled={!total||exporting}
+              title="Download the full filtered result set as CSV"
+              style={{padding:'6px 10px',borderRadius:8,background:'var(--muted)',border:'none',cursor:exporting?'wait':'pointer',color:'var(--text-dim)',display:'flex',alignItems:'center',gap:4,opacity:(total&&!exporting)?1:0.4}}>
+              <Download size={12}/><span style={{fontSize:12}}>{exporting?'Exporting…':`Export CSV (${total.toLocaleString()})`}</span>
             </button>
-            <button onClick={()=>{ loadStats(); loadRows(); }}
+            <button onClick={()=>{ loadStats(); loadMeta(); loadRows(); }}
               style={{padding:'6px 10px',borderRadius:8,background:'var(--muted)',border:'none',cursor:'pointer',color:'var(--text-dim)'}}>
               <RefreshCw size={12}/>
             </button>
@@ -158,8 +239,9 @@ export default function TDLRLicenses() {
         {/* Count */}
         <div style={{padding:'8px 24px',borderBottom:'1px solid var(--border)',fontSize:12,color:'var(--text-dim)',display:'flex',gap:16,alignItems:'center'}}>
           <span>{loading ? 'Loading…' : `${total.toLocaleString()} licenses`}</span>
-          {(filters.search||filters.county||filters.license_type||filters.expiring||filters.has_phone)&&
+          {Object.entries(filters).some(([k,v])=>v!==BLANK_FILTERS[k])&&
             <span style={{color:'var(--gold)'}}>· filtered</span>}
+          {error&&<span style={{color:'#ef4444'}}>· {error}</span>}
         </div>
 
         {/* Table */}
@@ -176,13 +258,21 @@ export default function TDLRLicenses() {
               {rows.map((r,i)=>{
                 const days = daysUntil(r.expire_date);
                 const expColor = expiryColor(r.expire_date);
+                const removed = isRemoved(r);
                 return (
                   <tr key={r.id} onClick={()=>setSelected(r)}
-                    style={{borderBottom:'1px solid var(--border)',cursor:'pointer',background:i%2===0?'transparent':'rgba(255,255,255,0.01)'}}
+                    style={{borderBottom:'1px solid var(--border)',cursor:'pointer',background:i%2===0?'transparent':'rgba(255,255,255,0.01)',opacity:removed?0.55:1}}
                     onMouseEnter={e=>e.currentTarget.style.background='var(--muted)'}
                     onMouseLeave={e=>e.currentTarget.style.background=i%2===0?'transparent':'rgba(255,255,255,0.01)'}>
                     <td style={{padding:'8px 12px',maxWidth:200}}>
-                      <div style={{color:'white',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.business_name||'—'}</div>
+                      <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
+                        <span style={{color:'white',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.business_name||'—'}</span>
+                        {removed&&(
+                          <span style={{fontSize:9,fontFamily:'monospace',letterSpacing:1,padding:'1px 6px',borderRadius:4,background:'var(--muted)',color:'var(--text-dim)',border:'1px solid var(--border)',flexShrink:0}}>
+                            REMOVED
+                          </span>
+                        )}
+                      </div>
                       {r.owner_name&&r.owner_name!==r.business_name&&(
                         <div style={{color:'var(--text-dim)',fontSize:11,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.owner_name}</div>
                       )}
@@ -192,9 +282,9 @@ export default function TDLRLicenses() {
                     <td style={{padding:'8px 12px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{r.business_county||'—'}</td>
                     <td style={{padding:'8px 12px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{r.business_city||'—'}</td>
                     <td style={{padding:'8px 12px',whiteSpace:'nowrap'}}>
-                      {r.business_phone
-                        ? <a href={`tel:${r.business_phone}`} onClick={e=>e.stopPropagation()} style={{color:'#4CC97A',textDecoration:'none',display:'flex',alignItems:'center',gap:4}}>
-                            <Phone size={10}/>{r.business_phone}
+                      {phoneOk(r.business_phone)
+                        ? <a href={`tel:${String(r.business_phone).trim()}`} onClick={e=>e.stopPropagation()} style={{color:'#4CC97A',textDecoration:'none',display:'flex',alignItems:'center',gap:4}}>
+                            <Phone size={10}/>{String(r.business_phone).trim()}
                           </a>
                         : <span style={{color:'var(--text-dim)'}}>—</span>}
                     </td>
@@ -237,7 +327,14 @@ export default function TDLRLicenses() {
         <div style={{width:320,borderLeft:'1px solid var(--border)',background:'var(--surface)',display:'flex',flexDirection:'column',overflow:'hidden',flexShrink:0}}>
           <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
             <div>
-              <div style={{fontSize:10,fontFamily:'monospace',letterSpacing:3,color:'var(--gold)',marginBottom:4}}>TDLR LICENSE</div>
+              <div style={{fontSize:10,fontFamily:'monospace',letterSpacing:3,color:'var(--gold)',marginBottom:4}}>
+                TDLR LICENSE
+                {isRemoved(selected)&&(
+                  <span style={{marginLeft:8,fontSize:9,letterSpacing:1,padding:'1px 6px',borderRadius:4,background:'var(--muted)',color:'var(--text-dim)',border:'1px solid var(--border)'}}>
+                    REMOVED
+                  </span>
+                )}
+              </div>
               <div style={{fontWeight:700,color:'white',fontSize:14,lineHeight:1.3}}>{selected.business_name||selected.owner_name}</div>
               <div style={{fontSize:11,color:'var(--text-dim)',marginTop:2}}>{selected.license_type}</div>
             </div>
@@ -250,8 +347,8 @@ export default function TDLRLicenses() {
               ['Owner', selected.owner_name],
               ['Address', [selected.business_address, selected.business_city, selected.business_state, selected.business_zip].filter(Boolean).join(', ')],
               ['County', selected.business_county],
-              ['Business Phone', selected.business_phone],
-              ['Owner Phone', selected.owner_phone],
+              ['Business Phone', phoneOk(selected.business_phone) ? String(selected.business_phone).trim() : null],
+              ['Owner Phone', phoneOk(selected.owner_phone) ? String(selected.owner_phone).trim() : null],
             ].map(([label,val])=> val?(
               <div key={label}>
                 <div style={{fontSize:10,fontFamily:'monospace',letterSpacing:2,color:'var(--text-dim)',marginBottom:3}}>{label.toUpperCase()}</div>

@@ -8,17 +8,17 @@ Internal CRM for Quantum Surety LLC — a Texas-licensed surety agency. Manages 
 **Backend:** Node.js/Express (ESM), served inside Docker (`qs-crm-backend`, port 4001 → internal 4000)  
 **Database:** PostgreSQL in `scraper-postgres` container (port 5433), database `quantum_surety`, user `quantum_user`  
 **Email:** AWS SES v2 via `@aws-sdk/client-sesv2` — configured in `backend/src/mailer.js`  
-**Public tunnel:** Cloudflare Tunnel (`quantum-crm`, tunnel ID `16894e75`) exposes backend at `https://crm-api.permitpilot.online` — used for SNS webhooks since the CRM is internal-only (192.168.4.122:8095)
+**Public tunnel:** Cloudflare Tunnel (`quantum-crm`, tunnel ID `16894e75`) exposes backend at `https://crm-api.permitpilot.online` — used for SNS webhooks.
 
 ## Deploy
 
-Server: `192.168.4.122` (SSH: `tsparks`). The CRM is internal-only — not reachable from the public internet directly.
+Server: `130.51.22.226` (VPS, SSH user: `root`). The old server at `192.168.4.122` is offline.
 
 ```bash
 # On server: pull and rebuild
 cd /usr/quantum-surety-crm
-sudo git pull origin main
-sudo docker compose up -d --build
+git pull origin main
+docker compose up -d --build
 ```
 
 GitHub Actions (`.github/workflows/auto-merge-claude.yml`) automatically merges any `claude/*` branch into `main` on push — no manual PR merge needed.

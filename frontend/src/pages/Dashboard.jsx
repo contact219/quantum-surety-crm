@@ -78,12 +78,13 @@ export default function Dashboard() {
     fetch('/api/analytics').then(r=>r.json()).then(setAnalytics).catch(()=>{});
     fetch('/api/campaigns').then(r=>r.json()).then(setCampaigns).catch(()=>{});
     fetch('/api/drip').then(r=>r.json()).then(setDrips).catch(()=>{});
+    fetch('/api/bookkeeping/kpi').then(r=>r.ok?r.json():null).then(d=>{ if(d && !d.error) setBk(d); }).catch(()=>{});
   },[]);
 
   const toggleDrip = async(id,status) => {
     await fetch(`/api/drip/${id}/status`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status==='active'?'paused':'active'})});
     fetch('/api/drip').then(r=>r.json()).then(setDrips);
-    fetch('/api/bookkeeping/kpi').then(r=>r.json()).then(setBk).catch(()=>{});
+    fetch('/api/bookkeeping/kpi').then(r=>r.ok?r.json():null).then(d=>{ if(d && !d.error) setBk(d); }).catch(()=>{});
   };
 
   const deleteDrip = async(id) => {

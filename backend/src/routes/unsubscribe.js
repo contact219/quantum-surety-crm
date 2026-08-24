@@ -57,6 +57,25 @@ unsubscribeRouter.get('/', async (req, res) => {
   } catch(err) { res.status(500).send('Error processing unsubscribe.'); }
 });
 
+// RFC 8058 one-click unsubscribe. Gmail/Yahoo POST to the List-Unsubscribe URL
+// (email stays in the query string; the form body is just
+// "List-Unsubscribe=One-Click" and can be ignored). Without this handler those
+// POSTs 404 and provider-side unsubscribes never reach the suppression table.
+unsubscribeRouter.post('/', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).end();
+  try {
+    await db.execute(sql`
+      INSERT INTO unsubscribes (email, source) VALUES (${email}, 'one-click')
+      ON CONFLICT (email) DO NOTHING
+    `);
+    res.status(200).end();
+  } catch (err) {
+    console.error('one-click unsubscribe error:', err.message);
+    res.status(500).end();
+  }
+});
+
 // Webhook for Resend events (opens, clicks, bounces)
 unsubscribeRouter.post('/webhook', async (req, res) => {
   try {

@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pool } from '../db.js';
+import { logAudit, actorOf, guardClosedPeriod } from './bookkeeping.js';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
 const ses = new SESv2Client({
@@ -105,6 +106,9 @@ async function initExpenses() {
       uploaded_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  // Link expenses auto-created by bill payment back to the bill by id.
+  await pool.query(`ALTER TABLE bk_expenses ADD COLUMN IF NOT EXISTS bill_id INTEGER`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS bk_expenses_bill_idx ON bk_expenses(bill_id)`);
 
   const { rows } = await pool.query('SELECT COUNT(*) FROM bk_expense_categories');
   if (parseInt(rows[0].count) === 0) {
@@ -200,30 +204,77 @@ expensesRouter.get('/expenses/summary', async (req, res) => {
 expensesRouter.post('/expenses', async (req, res) => {
   const { category_id, vendor, description, amount, expense_date, payment_method, reference_number, notes } = req.body;
   try {
+    if (!(await guardClosedPeriod(req, res, [expense_date || new Date()],
+      { entity: 'expense', detail: `Expense create — ${vendor || 'unknown vendor'}` }))) return;
     const { rows } = await pool.query(
       `INSERT INTO bk_expenses (category_id, vendor, description, amount, expense_date, payment_method, reference_number, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [category_id || null, vendor, description, amount, expense_date, payment_method || 'card', reference_number, notes]
     );
+    await logAudit(null, { action:'expense.create', entity:'expense', entity_id:rows[0].id,
+      actor:actorOf(req), amount:parseFloat(amount)||null, detail:`Created expense — ${vendor||'unknown vendor'}` });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// QBO-parity guard: an expense whose journal lines (bk_expenses:<id>:*) were
+// cleared in a COMPLETED bank reconciliation is part of a locked statement —
+// mutating or deleting it would silently diverge the ledger bank balance from
+// the reconciled balance while the recon's snapshotted totals still claim the
+// line. Tolerant of the recon tables not existing yet (bk_reports.js creates
+// them at boot): missing tables mean nothing can be locked.
+async function expenseReconLocked(expenseId) {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 1 FROM bk_cleared_lines cl
+      JOIN bk_reconciliations r ON r.id = cl.recon_id
+      WHERE r.status = 'completed' AND cl.line_key LIKE 'bk_expenses:' || $1::int || ':%'
+      LIMIT 1
+    `, [expenseId]);
+    return rows.length > 0;
+  } catch { return false; }
+}
+
 expensesRouter.put('/expenses/:id', async (req, res) => {
   const { category_id, vendor, description, amount, expense_date, payment_method, reference_number, notes } = req.body;
+  if (!/^\d+$/.test(String(req.params.id))) return res.status(400).json({ error: 'Numeric id required' });
+  if (await expenseReconLocked(req.params.id)) {
+    return res.status(409).json({ error: 'Expense has journal lines cleared in a completed bank reconciliation — reopen that reconciliation first' });
+  }
   try {
+    // Closed-period guard: both the stored and the new expense dates are
+    // money-effective dates of this edit.
+    const { rows: prevRows } = await pool.query(
+      'SELECT expense_date FROM bk_expenses WHERE id=$1', [req.params.id]
+    );
+    if (!prevRows.length) return res.status(404).json({ error: 'Not found' });
+    if (!(await guardClosedPeriod(req, res, [prevRows[0].expense_date, expense_date],
+      { entity: 'expense', entity_id: parseInt(req.params.id), detail: `Expense edit #${req.params.id}` }))) return;
     const { rows } = await pool.query(
       `UPDATE bk_expenses SET category_id=$1, vendor=$2, description=$3, amount=$4,
        expense_date=$5, payment_method=$6, reference_number=$7, notes=$8, updated_at=NOW()
        WHERE id=$9 RETURNING *`,
       [category_id || null, vendor, description, amount, expense_date, payment_method || 'card', reference_number, notes, req.params.id]
     );
+    await logAudit(null, { action:'expense.update', entity:'expense', entity_id:parseInt(req.params.id),
+      actor:actorOf(req), amount:parseFloat(amount)||null, detail:`Edited expense #${req.params.id} — ${vendor||'unknown vendor'}` });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 expensesRouter.delete('/expenses/:id', async (req, res) => {
+  if (!/^\d+$/.test(String(req.params.id))) return res.status(400).json({ error: 'Numeric id required' });
+  if (await expenseReconLocked(req.params.id)) {
+    return res.status(409).json({ error: 'Expense has journal lines cleared in a completed bank reconciliation — reopen that reconciliation first' });
+  }
   try {
+    // Closed-period guard on the expense date the delete would erase.
+    const { rows: prevRows } = await pool.query(
+      'SELECT expense_date FROM bk_expenses WHERE id=$1', [req.params.id]
+    );
+    if (!prevRows.length) return res.status(404).json({ error: 'Not found' });
+    if (!(await guardClosedPeriod(req, res, [prevRows[0].expense_date],
+      { entity: 'expense', entity_id: parseInt(req.params.id), detail: `Expense delete #${req.params.id}` }))) return;
     const { rows } = await pool.query(
       'SELECT filename FROM bk_expense_documents WHERE expense_id=$1', [req.params.id]
     );
@@ -231,7 +282,11 @@ expensesRouter.delete('/expenses/:id', async (req, res) => {
       const fp = path.join(UPLOAD_DIR, r.filename);
       if (fs.existsSync(fp)) fs.unlinkSync(fp);
     }
-    await pool.query('DELETE FROM bk_expenses WHERE id=$1', [req.params.id]);
+    const { rows: del } = await pool.query('DELETE FROM bk_expenses WHERE id=$1 RETURNING vendor, amount', [req.params.id]);
+    if (del.length) {
+      await logAudit(null, { action:'expense.delete', entity:'expense', entity_id:parseInt(req.params.id),
+        actor:actorOf(req), amount:parseFloat(del[0].amount)||null, detail:`Deleted expense #${req.params.id} — ${del[0].vendor||'unknown vendor'}` });
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -274,9 +329,13 @@ expensesRouter.get('/uploads/:filename', (req, res) => {
 });
 
 // ?????? CSV helpers ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+// Quotes commas/quotes/newlines and neutralizes spreadsheet formula injection:
+// cells starting with = + - @ are prefixed with a single quote — EXCEPT plain
+// numbers (e.g. -123.45), which must stay numeric for sums/imports to work.
 function csvCell(v) {
-  const s = v == null ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = v == null ? '' : String(v);
+  if (/^[=+\-@]/.test(s) && !/^[+-]?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function toCsv(headers, rows) {
   return [headers.join(','), ...rows.map(r => r.map(csvCell).join(','))].join('\r\n');

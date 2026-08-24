@@ -10,6 +10,37 @@ const STATUS_COLORS = {
   sent: '#3b82f6', confirmed: '#22c55e',
 };
 
+// Authenticated file download. window.location.assign(url) bypasses the
+// fetch() monkey-patch that attaches the Bearer token, so the request lands
+// unauthenticated (401 JSON replaces the SPA). Fetch → blob → a[download]
+// keeps the token AND keeps the user on the page. Optional `onHeaders` lets
+// callers inspect response headers (e.g. X-Journal-Rows / X-Journal-Warning
+// on the QBO journal export) before the blob is saved.
+async function downloadFile(url, fallbackName = 'export.csv', onHeaders) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) {
+      let msg = `Export failed (${r.status})`;
+      try { const d = await r.json(); if (d.error) msg = d.error; } catch {}
+      alert(msg);
+      return;
+    }
+    if (onHeaders) { try { onHeaders(r.headers); } catch {} }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^";]+)"?/);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = m ? m[1] : fallbackName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch {
+    alert('Export failed — network error');
+  }
+}
+
 function Badge({ label, color }) {
   return (
     <span style={{background: color+'22', color, border:`1px solid ${color}44`,
@@ -101,6 +132,167 @@ function Skeleton({ h=80, style={} }) {
     backgroundSize:'200% 100%', animation:'bkshimmer 1.3s infinite', ...style}} />;
 }
 
+// ─── FINANCIAL STATEMENT HELPERS (derived double-entry journal reports) ────────
+// Accounting-style money: 1,234.56 / (1,234.56) for negatives.
+const fmtMoney = (n) => {
+  const v = parseFloat(n || 0);
+  const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return v < 0 ? `(${s})` : s;
+};
+const TNUMS = { fontVariantNumeric: 'tabular-nums' };
+
+function BasisToggle({ basis, onChange }) {
+  return (
+    <div style={{display:'inline-flex',border:'1px solid var(--border)',borderRadius:6,overflow:'hidden'}}>
+      {['accrual','cash'].map(b => (
+        <button key={b} onClick={()=>onChange(b)}
+          style={{background:basis===b?'var(--gold)':'var(--muted)',color:basis===b?'#0a0f1e':'var(--text-dim)',
+            border:'none',padding:'6px 14px',fontSize:12,fontWeight:basis===b?700:500,cursor:'pointer',textTransform:'capitalize'}}>
+          {b}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function StmtHeader({ title, subtitle }) {
+  return (
+    <div style={{textAlign:'center',marginBottom:18}}>
+      <div style={{fontSize:15,fontWeight:800,letterSpacing:1}}>Quantum Surety</div>
+      <div style={{fontSize:13,color:'var(--gold)',fontWeight:700,marginTop:2}}>{title}</div>
+      {subtitle && <div style={{fontSize:11,color:'var(--text-dim)',marginTop:2}}>{subtitle}</div>}
+    </div>
+  );
+}
+
+function StmtSection({ label }) {
+  return <div style={{fontSize:11,fontWeight:800,color:'var(--gold)',textTransform:'uppercase',letterSpacing:1.5,
+    margin:'14px 0 4px',borderBottom:'1px solid var(--border)',paddingBottom:4}}>{label}</div>;
+}
+
+// Compare mode: when `prev` is passed, statement rows grow a prior-period
+// column and a delta column. Without `prev` the rendering is unchanged.
+const deltaColor = d => d > 0.004 ? '#22c55e' : d < -0.004 ? '#ef4444' : 'var(--text-dim)';
+
+function StmtAmounts({ amount, prev, color }) {
+  const cur = parseFloat(amount||0);
+  const d = cur - parseFloat(prev||0);
+  return (
+    <span style={{display:'inline-flex'}}>
+      <span style={{...TNUMS,textAlign:'right',minWidth:110,color:cur<0?'#ef4444':color}}>{fmtMoney(amount)}</span>
+      {prev !== undefined && (
+        <>
+          <span style={{...TNUMS,textAlign:'right',minWidth:110,color:'var(--text-dim)'}}>{fmtMoney(prev)}</span>
+          <span style={{...TNUMS,textAlign:'right',minWidth:110,color:deltaColor(d)}}>{fmtMoney(d)}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+function StmtCompareHead() {
+  return (
+    <div style={{display:'flex',justifyContent:'flex-end',fontSize:10,color:'var(--text-dim)',
+      textTransform:'uppercase',letterSpacing:1,paddingBottom:2,borderBottom:'1px solid var(--border)'}}>
+      <span style={{...TNUMS,textAlign:'right',minWidth:110}}>Current</span>
+      <span style={{...TNUMS,textAlign:'right',minWidth:110}}>Prior</span>
+      <span style={{...TNUMS,textAlign:'right',minWidth:110}}>Δ</span>
+    </div>
+  );
+}
+
+function StmtRow({ code, name, amount, indent=1, dim, prev }) {
+  return (
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',padding:'4px 0',fontSize:13}}>
+      <span style={{paddingLeft:indent*16,color:dim?'var(--text-dim)':'white'}}>
+        {code && <span style={{color:'var(--text-dim)',fontSize:11,marginRight:8,...TNUMS}}>{code}</span>}{name}
+      </span>
+      <StmtAmounts amount={amount} prev={prev} color="white" />
+    </div>
+  );
+}
+
+function StmtSubtotal({ name, amount, indent=0, prev }) {
+  return (
+    <div style={{display:'flex',justifyContent:'space-between',padding:'5px 0',fontSize:13,fontWeight:700,borderTop:'1px solid var(--border)',marginTop:2}}>
+      <span style={{paddingLeft:indent*16}}>{name}</span>
+      <StmtAmounts amount={amount} prev={prev} color="var(--gold)" />
+    </div>
+  );
+}
+
+function StmtTotal({ name, amount, color='var(--gold)', prev }) {
+  return (
+    <div style={{display:'flex',justifyContent:'space-between',padding:'7px 0',fontSize:14,fontWeight:800,borderTop:'2px solid var(--gold)',marginTop:8}}>
+      <span>{name}</span>
+      <StmtAmounts amount={amount} prev={prev} color={color} />
+    </div>
+  );
+}
+
+// Prior period of equal length, ending the day before `from` (Compare mode).
+const priorPeriod = (from, to) => {
+  const f = new Date(`${from}T00:00:00Z`), t = new Date(`${to}T00:00:00Z`);
+  const days = Math.round((t - f) / 86400000) + 1;
+  const pt = new Date(f); pt.setUTCDate(pt.getUTCDate() - 1);
+  const pf = new Date(pt); pf.setUTCDate(pf.getUTCDate() - (days - 1));
+  const iso = d => d.toISOString().slice(0, 10);
+  return [iso(pf), iso(pt)];
+};
+
+// Union of current and prior statement rows keyed by account code (Compare mode).
+const mergeStmtRows = (cur, prev) => {
+  const key = r => r.code || r.name;
+  const map = new Map();
+  for (const r of cur || []) map.set(key(r), { code:r.code, name:r.name, amount:parseFloat(r.amount||0), prev:0 });
+  for (const r of prev || []) {
+    const k = key(r);
+    if (map.has(k)) map.get(k).prev = parseFloat(r.amount||0);
+    else map.set(k, { code:r.code, name:r.name, amount:0, prev:parseFloat(r.amount||0) });
+  }
+  return [...map.values()];
+};
+
+function CompareToggle({ on, onChange }) {
+  return (
+    <button onClick={()=>onChange(!on)}
+      style={{fontSize:12,padding:'6px 14px',borderRadius:6,border:'1px solid var(--border)',
+        background:on?'var(--gold)':'var(--muted)',color:on?'#0a0f1e':'var(--text-dim)',
+        fontWeight:on?700:500,cursor:'pointer'}}>
+      Compare
+    </button>
+  );
+}
+
+// Client-side CSV download for the statement tabs (P&L / Balance Sheet /
+// Trial Balance) — month-end deliverables for the CPA without screenshots.
+function downloadCsv(filename, rows) {
+  const esc = v => {
+    const s = v == null ? '' : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = rows.map(r => r.map(esc).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function BalancedBadge({ balanced }) {
+  const c = balanced ? '#22c55e' : '#ef4444';
+  return <span style={{background:c+'22',color:c,border:`1px solid ${c}44`,borderRadius:4,padding:'2px 10px',fontSize:11,fontWeight:700}}>
+    {balanced ? '✓ Balanced' : '⚠ Out of balance'}</span>;
+}
+
+function ReportError({ msg, onRetry }) {
+  return (
+    <Card style={{borderColor:'#ef444455'}}>
+      <div style={{color:'#ef4444',fontSize:13,marginBottom:onRetry?10:0}}>⚠ {msg || 'Failed to load report'}</div>
+      {onRetry && <Btn variant="ghost" onClick={onRetry}>Retry</Btn>}
+    </Card>
+  );
+}
+
 // ─── DASHBOARD ─────────────────────────────────────────────────────────────────
 function DashboardTab({ onDrill }) {
   const [data, setData] = useState(null);
@@ -131,21 +323,21 @@ function DashboardTab({ onDrill }) {
   return (
     <div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:8}}>
-        <div style={{fontSize:12,color:'var(--text-dim)'}}>Earned figures count <b style={{color:'#22c55e'}}>issued</b> bonds only · pipeline shown separately</div>
+        <div style={{fontSize:12,color:'var(--text-dim)'}}>Written figures accrue at issuance (<b style={{color:'#22c55e'}}>issued</b> bonds by effective month, not cash collected) · pipeline shown separately</div>
         <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
           style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 12px',color:'white',fontSize:13}} />
       </div>
 
       {/* Earned KPIs */}
       <div style={grid}>
-        <KPI label="Premiums Collected" value={data.premiums_collected} color="var(--gold)" />
-        <KPI label="Commission Earned" value={data.commission_earned} color="#22c55e" />
+        <KPI label="Premiums Written" value={data.premiums_written} color="var(--gold)" />
+        <KPI label="Commission Written" value={data.commission_written} color="#22c55e" />
         <KPI label="Remittances Sent" value={data.remittances_sent} />
         <KPI label="Bonds Issued" value={data.bonds_issued} isCount
           onClick={()=>onDrill && onDrill('issued')} />
       </div>
       <div style={{...grid, marginBottom:16}}>
-        <KPI label="Overdue Payments" value={data.overdue_payments} color={parseFloat(data.overdue_payments)>0?'#ef4444':undefined} isCount />
+        <KPI label="Uncollected 30d+" value={data.overdue_payments} color={parseFloat(data.overdue_payments)>0?'#ef4444':undefined} isCount />
         <KPI label="Renewals Due (45d)" value={data.renewals_due} color={parseFloat(data.renewals_due)>0?'#f59e0b':undefined} isCount />
         <KPI label="Trust Balance" value={data.trust_balance} color="#22c55e" />
       </div>
@@ -468,6 +660,7 @@ function BondsTab({ carriers, initialStatus }) {
 function PaymentsTab() {
   const [payments, setPayments] = useState([]);
   const [aging, setAging] = useState([]);
+  const [view, setView] = useState('payments'); // 'payments' | 'aging' (A/R aging by insured)
   const [filters, setFilters] = useState({ status:'', month:'' });
   const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
 
@@ -492,6 +685,17 @@ function PaymentsTab() {
 
   return (
     <div>
+      {/* Subview switch: raw payments vs. A/R aging statement by insured */}
+      <div style={{display:'flex',gap:8,marginBottom:16}}>
+        {[['payments','Payments'],['aging','A/R Aging']].map(([v,l])=>(
+          <button key={v} onClick={()=>setView(v)}
+            style={{fontSize:12,padding:'6px 14px',borderRadius:6,border:'1px solid var(--border)',
+              background:view===v?'var(--gold)':'var(--muted)',color:view===v?'#0a0f1e':'white',
+              fontWeight:view===v?700:400,cursor:'pointer'}}>{l}</button>
+        ))}
+      </div>
+
+      {view === 'aging' ? <ARAgingView /> : (<>
       {/* Aging buckets — pending (uncollected) receivables by days outstanding */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:20}}>
         {aging.map(b => (
@@ -548,6 +752,7 @@ function PaymentsTab() {
           </tbody>
         </table>
       </Card>
+      </>)}
     </div>
   );
 }
@@ -581,7 +786,7 @@ function TrustTab() {
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
           <input type="date" value={from} onChange={e=>setFrom(e.target.value)} style={sf} />
           <input type="date" value={to} onChange={e=>setTo(e.target.value)} style={sf} />
-          <Btn variant="ghost" onClick={() => window.location.assign(`${API}/export/trust?from=${from}&to=${to}`)}>Export CSV</Btn>
+          <Btn variant="ghost" onClick={() => downloadFile(`${API}/export/trust?from=${from}&to=${to}`, 'trust_ledger.csv')}>Export CSV</Btn>
         </div>
       </div>
 
@@ -661,7 +866,7 @@ function RemittancesTab({ carriers }) {
   const [remittances, setRemittances] = useState([]);
   const [filters, setFilters] = useState({ carrier_id:'', status:'' });
   const [showGen, setShowGen] = useState(false);
-  const [genForm, setGenForm] = useState({ carrier_id:'', period_start:'', period_end:'' });
+  const [genForm, setGenForm] = useState({ carrier_id:'', period_start:'', period_end:'', include_uncollected:false });
   const [expanded, setExpanded] = useState(null);
   const [remBonds, setRemBonds] = useState({});
   const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
@@ -696,7 +901,10 @@ function RemittancesTab({ carriers }) {
   };
 
   const updateStatus = async (id, status) => {
-    if (!window.confirm(`Mark remittance as ${status}?`)) return;
+    const msg = status === 'sent'
+      ? 'Mark remittance as sent? The remittance statement will be emailed to the carrier.'
+      : `Mark remittance as ${status}?`;
+    if (!window.confirm(msg)) return;
     const r = await fetch(`${API}/remittances/${id}/status`, { method:'PUT',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status }) });
     const d = await r.json();
@@ -713,10 +921,10 @@ function RemittancesTab({ carriers }) {
         </select>
         <select value={filters.status} onChange={e=>setFilters(f=>({...f,status:e.target.value}))} style={sf}>
           <option value="">All Statuses</option>
-          {['pending','sent','confirmed'].map(s=><option key={s} value={s}>{s}</option>)}
+          {['pending','sent','confirmed','cancelled'].map(s=><option key={s} value={s}>{s}</option>)}
         </select>
         <Btn onClick={() => setShowGen(true)}>⚡ Generate Remittance</Btn>
-        <Btn variant="ghost" onClick={() => window.location.assign(`${API}/export/remittances`)}>Export CSV</Btn>
+        <Btn variant="ghost" onClick={() => downloadFile(`${API}/export/remittances`, 'remittances.csv')}>Export CSV</Btn>
       </div>
 
       <Card style={{padding:0,overflow:'auto'}}>
@@ -742,6 +950,7 @@ function RemittancesTab({ carriers }) {
                   <td style={{padding:'10px 14px'}}>{r.auto_generated?'⚡':'—'}</td>
                   <td style={{padding:'10px 14px'}} onClick={e=>e.stopPropagation()}>
                     {r.status==='pending' && <Btn onClick={()=>updateStatus(r.id,'sent')} style={{fontSize:11,padding:'3px 10px',marginRight:4}}>Mark Sent</Btn>}
+                    {r.status==='pending' && <Btn variant="danger" onClick={()=>updateStatus(r.id,'cancelled')} style={{fontSize:11,padding:'3px 10px',marginRight:4}}>Cancel</Btn>}
                     {r.status==='sent' && <Btn onClick={()=>updateStatus(r.id,'confirmed')} style={{fontSize:11,padding:'3px 10px'}}>Confirm</Btn>}
                   </td>
                 </tr>
@@ -782,6 +991,12 @@ function RemittancesTab({ carriers }) {
             options={[{value:'',label:'Select carrier'},...carriers.map(c=>({value:c.id,label:c.name}))]} />
           <FInput label="Period Start" type="date" value={genForm.period_start} onChange={e=>setGenForm(f=>({...f,period_start:e.target.value}))} />
           <FInput label="Period End" type="date" value={genForm.period_end} onChange={e=>setGenForm(f=>({...f,period_end:e.target.value}))} />
+          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--text-dim)',marginBottom:14,cursor:'pointer'}}>
+            <input type="checkbox" checked={genForm.include_uncollected}
+              onChange={e=>setGenForm(f=>({...f,include_uncollected:e.target.checked}))}
+              style={{accentColor:'var(--gold)'}} />
+            Include bonds without collected payments (legacy / direct-bill business)
+          </label>
           <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
             <Btn variant="ghost" onClick={() => setShowGen(false)}>Cancel</Btn>
             <Btn onClick={generate}>Generate</Btn>
@@ -822,6 +1037,16 @@ function CarriersTab({ carriers, onRefresh }) {
     onRefresh();
   };
 
+  const toggleDirectBill = async (carrier) => {
+    const next = !carrier.direct_bill;
+    if (!window.confirm(next
+      ? `Mark ${carrier.name} as DIRECT BILL? The carrier bills insureds and pays commission directly — its scraper bonds skip A/R, trust and remittances in the books.`
+      : `Mark ${carrier.name} as AGENCY BILL? Its bonds will book A/R and carrier premium payable, and premium must be collected into trust.`)) return;
+    await fetch(`${API}/carriers/${carrier.id}`, { method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ...carrier, direct_bill: next }) });
+    onRefresh();
+  };
+
   return (
     <div>
       <div style={{display:'flex',justifyContent:'flex-end',marginBottom:16}}>
@@ -835,7 +1060,10 @@ function CarriersTab({ carriers, onRefresh }) {
                 <div style={{fontWeight:700,fontSize:15}}>{c.name}</div>
                 {c.naic_code && <div style={{fontSize:11,color:'var(--text-dim)'}}>NAIC #{c.naic_code}</div>}
               </div>
-              <Badge label={c.active?'Active':'Inactive'} color={c.active?'#22c55e':'#94a3b8'} />
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                <Badge label={c.direct_bill?'Direct Bill':'Agency Bill'} color={c.direct_bill?'#3b82f6':'#a855f7'} />
+                <Badge label={c.active?'Active':'Inactive'} color={c.active?'#22c55e':'#94a3b8'} />
+              </div>
             </div>
             {c.contact_email && <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:4}}>✉ {c.contact_email}</div>}
             {c.contact_phone && <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:4}}>✆ {c.contact_phone}</div>}
@@ -851,8 +1079,11 @@ function CarriersTab({ carriers, onRefresh }) {
                 ))}
               </div>
             )}
-            <div style={{display:'flex',gap:6}}>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
               <Btn variant="ghost" onClick={() => setRateCarrier(c.id)} style={{fontSize:12,padding:'4px 10px'}}>+ Rate</Btn>
+              <Btn variant="ghost" onClick={() => toggleDirectBill(c)} style={{fontSize:12,padding:'4px 10px'}}>
+                {c.direct_bill ? '→ Agency Bill' : '→ Direct Bill'}
+              </Btn>
               {c.active && <Btn variant="danger" onClick={() => deactivate(c)} style={{fontSize:12,padding:'4px 10px'}}>Deactivate</Btn>}
             </div>
           </Card>
@@ -872,6 +1103,10 @@ function CarriersTab({ carriers, onRefresh }) {
               options={[{value:'monthly',label:'Monthly'},{value:'quarterly',label:'Quarterly'}]} />
             <FInput label="Day of Month" type="number" min="1" max="28" value={form.remittance_day} onChange={e=>setForm(f=>({...f,remittance_day:parseInt(e.target.value)}))} />
           </div>
+          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--text-dim)',margin:'4px 0 8px',cursor:'pointer'}}>
+            <input type="checkbox" checked={!!form.direct_bill} onChange={e=>setForm(f=>({...f,direct_bill:e.target.checked}))} />
+            Direct bill (carrier bills insureds and pays commission directly — no trust/remittances)
+          </label>
           <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
             <Btn variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Btn>
             <Btn onClick={save}>Save Carrier</Btn>
@@ -902,6 +1137,11 @@ function ReportsTab() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0,7));
   const [toast, setToast] = useState(null);
   const [running, setRunning] = useState(false);
+  // QuickBooks journal exports
+  const yNow = new Date().getFullYear();
+  const [qbFrom, setQbFrom] = useState(`${yNow}-01-01`);
+  const [qbTo, setQbTo] = useState(new Date().toISOString().slice(0,10));
+  const [qbBasis, setQbBasis] = useState('accrual');
   // Expense report
   const [expFrom, setExpFrom] = useState('');
   const [expTo, setExpTo] = useState('');
@@ -937,7 +1177,7 @@ function ReportsTab() {
     const p = new URLSearchParams();
     if (expFrom) p.set('from', expFrom);
     if (expTo)   p.set('to',   expTo);
-    window.location.assign(`${API}/export/${type}?${p}`);
+    downloadFile(`${API}/export/${type}?${p}`, `${type}.csv`);
   };
 
   const sendExpEmail = async () => {
@@ -1012,10 +1252,10 @@ function ReportsTab() {
               style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13}} />
           </div>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
-            <Btn variant="ghost" onClick={() => window.location.assign(`${API}/export/bonds?month=${month}`)}>⬇ Bonds CSV</Btn>
-            <Btn variant="ghost" onClick={() => window.location.assign(`${API}/export/commission?month=${month}`)}>⬇ Commission CSV</Btn>
-            <Btn variant="ghost" onClick={() => window.location.assign(`${API}/export/remittances`)}>⬇ Remittances CSV</Btn>
-            <Btn variant="ghost" onClick={() => window.location.assign(`${API}/export/trust`)}>⬇ Trust Ledger CSV</Btn>
+            <Btn variant="ghost" onClick={() => downloadFile(`${API}/export/bonds?month=${month}`, 'bonds.csv')}>⬇ Bonds CSV</Btn>
+            <Btn variant="ghost" onClick={() => downloadFile(`${API}/export/commission?month=${month}`, 'commission.csv')}>⬇ Commission CSV</Btn>
+            <Btn variant="ghost" onClick={() => downloadFile(`${API}/export/remittances`, 'remittances.csv')}>⬇ Remittances CSV</Btn>
+            <Btn variant="ghost" onClick={() => downloadFile(`${API}/export/trust`, 'trust_ledger.csv')}>⬇ Trust Ledger CSV</Btn>
           </div>
         </Card>
         <Card>
@@ -1026,6 +1266,50 @@ function ReportsTab() {
             <Btn variant="ghost" onClick={()=>runJob('renewal-scan','Renewal scan')}>Renewal Scan Only</Btn>
             <Btn variant="ghost" onClick={()=>runJob('payment-overdue-scan','Payment scan')}>Payment Overdue Scan</Btn>
             <Btn variant="ghost" onClick={()=>runJob('auto-remittance','Auto-remittance')}>Auto-Remittance</Btn>
+          </div>
+        </Card>
+
+        {/* QuickBooks journal exports (derived double-entry journal) */}
+        <Card style={{gridColumn:'1/-1'}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>QuickBooks Export — Journal Entries</div>
+          <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:14}}>
+            Every bond, payment, remittance, expense and bill as balanced debit/credit journal entries over the virtual chart of accounts.
+          </div>
+          <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap',marginBottom:16}}>
+            <div>
+              <label style={{fontSize:11,color:'var(--text-dim)',display:'block',marginBottom:3}}>From</label>
+              <input type="date" value={qbFrom} onChange={e=>setQbFrom(e.target.value)}
+                style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',color:'white',fontSize:13}}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:'var(--text-dim)',display:'block',marginBottom:3}}>To</label>
+              <input type="date" value={qbTo} onChange={e=>setQbTo(e.target.value)}
+                style={{background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',color:'white',fontSize:13}}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:'var(--text-dim)',display:'block',marginBottom:3}}>Basis</label>
+              <BasisToggle basis={qbBasis} onChange={setQbBasis} />
+            </div>
+          </div>
+          <div style={{display:'flex',gap:24,flexWrap:'wrap'}}>
+            <div>
+              <Btn variant="ghost" onClick={()=>downloadFile(`${API}/export/qbo-accounts.csv`, 'qbo_accounts.csv')}>⬇ QBO Accounts CSV</Btn>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginTop:5}}>Import FIRST — every account name must already exist in the QBO chart of accounts.</div>
+            </div>
+            <div>
+              {/* fetch+blob download (downloadFile) so the X-Journal-Rows /
+                  X-Journal-Warning response headers are readable — QBO's
+                  journal importer caps files around 1,000 rows. */}
+              <Btn variant="ghost" onClick={()=>downloadFile(`${API}/export/qbo-journal.csv?from=${qbFrom}&to=${qbTo}&basis=${qbBasis}`, 'qbo_journal.csv', h=>{
+                const warn = h.get('X-Journal-Warning');
+                if (warn) setToast(`⚠ ${h.get('X-Journal-Rows')||'Many'} journal rows — ${warn}`);
+              })}>⬇ QBO Journal CSV</Btn>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginTop:5}}>QuickBooks Online: Settings → Import data → Journal entries.</div>
+            </div>
+            <div>
+              <Btn variant="ghost" onClick={()=>downloadFile(`${API}/export/iif?from=${qbFrom}&to=${qbTo}&basis=${qbBasis}`, 'journal.iif')}>⬇ IIF (Desktop)</Btn>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginTop:5}}>QuickBooks Desktop: File → Utilities → Import → IIF Files.</div>
+            </div>
           </div>
         </Card>
 
@@ -1508,19 +1792,36 @@ function PLTab() {
   const y = now.getFullYear();
   const [from, setFrom] = useState(`${y}-01-01`);
   const [to,   setTo]   = useState(`${y}-12-31`);
+  const [basis, setBasis] = useState('accrual');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [compare, setCompare] = useState(false);
+  const [prevData, setPrevData] = useState(null);
 
   const load = async () => {
-    setLoading(true);
+    setLoading(true); setErr(null);
     try {
-      const r = await fetch(`${API}/pl?from=${from}&to=${to}`);
-      setData(await r.json());
-    } catch {}
+      const r = await fetch(`${API}/reports/pnl?from=${from}&to=${to}&basis=${basis}`);
+      if (!r.ok) throw new Error(`Request failed (${r.status})`);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      setData(d);
+    } catch (e) { setErr(e.message || 'Failed to load P&L'); }
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [from, to]);
+  useEffect(() => { load(); }, [from, to, basis]);
+
+  // Compare mode: prior period of equal length, immediately before `from`.
+  const [pFrom, pTo] = priorPeriod(from, to);
+  useEffect(() => {
+    if (!compare) { setPrevData(null); return; }
+    fetch(`${API}/reports/pnl?from=${pFrom}&to=${pTo}&basis=${basis}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setPrevData(d && !d.error ? d : null))
+      .catch(() => setPrevData(null));
+  }, [compare, pFrom, pTo, basis]);
 
   const presets = [
     ['This Year', `${y}-01-01`, `${y}-12-31`],
@@ -1532,10 +1833,17 @@ function PLTab() {
   ];
 
   const sf = { background:'var(--muted)', border:'1px solid var(--border)', borderRadius:6, padding:'7px 10px', color:'white', fontSize:13 };
-  const rev = data ? parseFloat(data.revenue||0) : 0;
+  const rev = data ? parseFloat(data.total_revenue||0) : 0;
   const exp = data ? parseFloat(data.total_expenses||0) : 0;
-  const net = rev - exp;
+  const net = data && data.net_income !== undefined ? parseFloat(data.net_income||0) : rev - exp;
   const margin = rev > 0 ? (net/rev*100).toFixed(1) : 0;
+
+  const cmp = compare && prevData ? prevData : null;
+  const pRev = cmp ? parseFloat(cmp.total_revenue||0) : 0;
+  const pExp = cmp ? parseFloat(cmp.total_expenses||0) : 0;
+  const pNet = cmp ? (cmp.net_income !== undefined ? parseFloat(cmp.net_income||0) : pRev - pExp) : 0;
+  const revRows = cmp ? mergeStmtRows(data?.revenue, cmp.revenue) : (data?.revenue||[]);
+  const expRows = cmp ? mergeStmtRows(data?.expenses, cmp.expenses) : (data?.expenses||[]);
 
   return (
     <div>
@@ -1546,12 +1854,37 @@ function PLTab() {
             style={{fontSize:12,padding:'5px 12px',borderRadius:6,border:'1px solid var(--border)',background: from===f&&to===t?'var(--gold)':'var(--muted)',color: from===f&&to===t?'#000':'white',cursor:'pointer',fontWeight: from===f&&to===t?700:400}}>{l}</button>
         ))}
         <input type="date" value={from} onChange={e=>setFrom(e.target.value)} style={sf}/>
-        <span style={{color:'var(--text-dim)'}}>???</span>
+        <span style={{color:'var(--text-dim)'}}>–</span>
         <input type="date" value={to} onChange={e=>setTo(e.target.value)} style={sf}/>
+        <BasisToggle basis={basis} onChange={setBasis} />
+        <CompareToggle on={compare} onChange={setCompare} />
+        <span style={{fontSize:11,color:'var(--text-dim)'}}>
+          {basis==='cash' ? 'Cash basis: recognized when money moves' : 'Accrual basis: recognized when earned/incurred'}
+          {compare && ` · vs prior period ${pFrom} – ${pTo}`}
+        </span>
+        <span style={{marginLeft:'auto'}}>
+          <Btn variant="ghost" onClick={()=>{
+            if (!data) return;
+            downloadCsv(`pnl_${basis}_${from}_${to}.csv`, [
+              ['Quantum Surety — Profit & Loss'],
+              [`${from} to ${to}`, `${basis} basis`],
+              [],
+              ['Code','Account','Amount'],
+              ['','REVENUE',''],
+              ...(data.revenue||[]).map(r=>[r.code,r.name,Number(r.amount||0).toFixed(2)]),
+              ['','Total Revenue',rev.toFixed(2)],
+              ['','EXPENSES',''],
+              ...(data.expenses||[]).map(x=>[x.code,x.name,Number(x.amount||0).toFixed(2)]),
+              ['','Total Expenses',exp.toFixed(2)],
+              ['','Net Income',net.toFixed(2)],
+            ]);
+          }}>Export CSV</Btn>
+        </span>
       </div>
 
-      {loading && <div style={{color:'var(--text-dim)',padding:20}}>Loading???</div>}
-      {data && !loading && (
+      {loading && <Skeleton h={300} />}
+      {err && !loading && <ReportError msg={err} onRetry={load} />}
+      {data && !loading && !err && (
         <>
           {/* KPI row */}
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
@@ -1568,54 +1901,24 @@ function PLTab() {
             ))}
           </div>
 
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-            {/* Revenue breakdown */}
-            <Card>
-              <div style={{fontWeight:700,fontSize:14,marginBottom:14,color:'#22c55e'}}>Revenue ??? by Bond Type</div>
-              {data.revenue_by_type?.length ? data.revenue_by_type.map(r=>(
-                <div key={r.bond_type} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
-                  <span style={{color:'var(--text-dim)'}}>{r.bond_type||'Other'}</span>
-                  <span style={{color:'#22c55e',fontWeight:600}}>${parseFloat(r.commission).toFixed(2)}</span>
-                </div>
-              )) : <div style={{color:'var(--text-dim)',fontSize:13}}>No bond revenue in period</div>}
-              <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,marginTop:8,paddingTop:8,borderTop:'2px solid var(--border)'}}>
-                <span>Total</span><span style={{color:'#22c55e'}}>${rev.toFixed(2)}</span>
-              </div>
-            </Card>
+          {/* Statement-format P&L (QBO-style, printable/exportable) */}
+          <Card style={{maxWidth:cmp?860:640,margin:'0 auto',padding:'28px 36px'}}>
+            <StmtHeader title="Profit & Loss"
+              subtitle={`${from} – ${to} · ${basis==='cash'?'Cash':'Accrual'} basis${cmp?` · vs ${pFrom} – ${pTo}`:''}`} />
+            {cmp && <StmtCompareHead />}
 
-            {/* Expense breakdown */}
-            <Card>
-              <div style={{fontWeight:700,fontSize:14,marginBottom:14,color:'#ef4444'}}>Expenses ??? by Category</div>
-              {data.expenses_by_category?.length ? data.expenses_by_category.map(e=>(
-                <div key={e.category} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
-                  <span style={{color:'var(--text-dim)'}}>{e.category}</span>
-                  <span style={{color:'#ef4444',fontWeight:600}}>${parseFloat(e.total).toFixed(2)}</span>
-                </div>
-              )) : <div style={{color:'var(--text-dim)',fontSize:13}}>No expenses in period</div>}
-              <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,marginTop:8,paddingTop:8,borderTop:'2px solid var(--border)'}}>
-                <span>Total</span><span style={{color:'#ef4444'}}>${exp.toFixed(2)}</span>
-              </div>
-            </Card>
-          </div>
+            <StmtSection label="Revenue" />
+            {revRows.map(r => <StmtRow key={r.code||r.name} code={r.code} name={r.name} amount={r.amount} prev={cmp?r.prev:undefined} />)}
+            {!revRows.length && <StmtRow name="No revenue in period" amount={0} dim />}
+            <StmtSubtotal name="Total Revenue" amount={rev} prev={cmp?pRev:undefined} />
 
-          {/* Net income bar */}
-          <Card style={{marginTop:16}}>
-            <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>Net Income Summary</div>
-            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
-              <div style={{flex:1,height:24,background:'var(--muted)',borderRadius:4,overflow:'hidden'}}>
-                <div style={{height:'100%',width:`${Math.min(100,rev>0?(rev/(rev+exp)*100):0).toFixed(1)}%`,background:'#22c55e',borderRadius:4}}/>
-              </div>
-              <span style={{fontSize:13,color:'var(--text-dim)',minWidth:80,textAlign:'right'}}>Rev: ${rev.toFixed(0)}</span>
-            </div>
-            <div style={{display:'flex',alignItems:'center',gap:12}}>
-              <div style={{flex:1,height:24,background:'var(--muted)',borderRadius:4,overflow:'hidden'}}>
-                <div style={{height:'100%',width:`${Math.min(100,rev>0?(exp/rev*100):0).toFixed(1)}%`,background:'#ef4444',borderRadius:4}}/>
-              </div>
-              <span style={{fontSize:13,color:'var(--text-dim)',minWidth:80,textAlign:'right'}}>Exp: ${exp.toFixed(0)}</span>
-            </div>
-            <div style={{marginTop:12,fontSize:15,fontWeight:700,color:net>=0?'#22c55e':'#ef4444'}}>
-              Net: ${net.toFixed(2)} ({margin}% margin)
-            </div>
+            <StmtSection label="Expenses" />
+            {expRows.map(x => <StmtRow key={x.code||x.name} code={x.code} name={x.name} amount={x.amount} prev={cmp?x.prev:undefined} />)}
+            {!expRows.length && <StmtRow name="No expenses in period" amount={0} dim />}
+            <StmtSubtotal name="Total Expenses" amount={exp} prev={cmp?pExp:undefined} />
+
+            <StmtTotal name="Net Income" amount={net} color={net>=0?'#22c55e':'#ef4444'} prev={cmp?pNet:undefined} />
+            <div style={{marginTop:8,fontSize:12,color:'var(--text-dim)',textAlign:'right'}}>{margin}% margin</div>
           </Card>
         </>
       )}
@@ -2143,7 +2446,7 @@ function Tab1099() {
   const [data, setData] = useState(null);
   const load = () => fetch(`${API}/vendors/1099?year=${year}`).then(r=>r.json()).then(setData).catch(()=>{});
   useEffect(()=>{ load(); },[year]);
-  const downloadPacket = () => window.location.assign(`${API}/export/tax-packet?year=${year}`);
+  const downloadPacket = () => downloadFile(`${API}/export/tax-packet?year=${year}`, `tax_packet_${year}.csv`);
   return (
     <div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
@@ -2199,6 +2502,98 @@ function Tab1099() {
   );
 }
 
+// ─── CLOSE THE BOOKS ───────────────────────────────────────────────────────────
+// Locks all money-moving mutations dated on or before the closing date —
+// guarded endpoints return 409 "period closed through …" unless overridden.
+function CloseBooksCard() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [form, setForm] = useState({ closing_date:'', note:'' });
+  const [busy, setBusy] = useState(false);
+  const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
+
+  const load = useCallback(() => {
+    fetch(`${API}/close-the-books`)
+      .then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); })
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); setErr(null); })
+      .catch(e => setErr(e.message || 'Failed to load closing date'));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const closeBooks = async () => {
+    if (!form.closing_date) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`${API}/close-the-books`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form) });
+      const d = await r.json();
+      if (d.error) alert(d.error);
+      else { setForm({ closing_date:'', note:'' }); load(); }
+    } catch { alert('Failed to close the books'); }
+    setBusy(false);
+  };
+
+  const reopen = async (h) => {
+    if (!window.confirm(`Reopen the books? This removes the close through ${String(h.closing_date||'').slice(0,10)} — the reopen is written to the audit log.`)) return;
+    try {
+      const r = await fetch(`${API}/close-the-books/${h.id}`, { method:'DELETE' });
+      const d = await r.json().catch(()=>({}));
+      if (d.error) { alert(d.error); return; }
+      load();
+    } catch { alert('Failed to reopen'); }
+  };
+
+  const closingDate = data?.closing_date ? String(data.closing_date).slice(0,10) : null;
+  const history = data?.history || [];
+
+  return (
+    <Card style={{marginBottom:20, borderColor: closingDate ? 'var(--gold)'+'55' : 'var(--border)'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12,marginBottom:12}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:2}}>Close the Books</div>
+          <div style={{fontSize:11,color:'var(--text-dim)'}}>
+            Money-moving edits dated on or before the closing date are rejected until the period is reopened.
+          </div>
+        </div>
+        <div style={{textAlign:'right'}}>
+          <div style={{fontSize:11,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1,marginBottom:2}}>Closed Through</div>
+          <div style={{fontSize:20,fontWeight:800,color:closingDate?'var(--gold)':'var(--text-dim)'}}>{closingDate || 'Books open'}</div>
+        </div>
+      </div>
+      {err && <div style={{fontSize:12,color:'#ef4444',marginBottom:10}}>⚠ {err}</div>}
+      <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap',marginBottom:history.length?14:0}}>
+        <div>
+          <label style={{fontSize:11,color:'var(--text-dim)',display:'block',marginBottom:3}}>Close through</label>
+          <input type="date" value={form.closing_date} max={new Date().toISOString().slice(0,10)}
+            onChange={e=>setForm(f=>({...f,closing_date:e.target.value}))} style={sf} />
+        </div>
+        <div style={{flex:1,minWidth:180}}>
+          <label style={{fontSize:11,color:'var(--text-dim)',display:'block',marginBottom:3}}>Note</label>
+          <input placeholder="e.g. FY2025 close — CPA reviewed" value={form.note}
+            onChange={e=>setForm(f=>({...f,note:e.target.value}))} style={{...sf,width:'100%',boxSizing:'border-box'}} />
+        </div>
+        <Btn onClick={closeBooks} disabled={busy || !form.closing_date}>{busy?'Closing...':'Close Books'}</Btn>
+      </div>
+      {history.length > 0 && (
+        <div style={{borderTop:'1px solid var(--border)',paddingTop:10}}>
+          <div style={{fontSize:11,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1,marginBottom:6}}>History</div>
+          {history.map(h => (
+            <div key={h.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,padding:'6px 0',borderTop:'1px solid var(--border)',fontSize:12}}>
+              <div>
+                <span style={{fontWeight:600,color:'white'}}>{String(h.closing_date||'').slice(0,10)}</span>
+                {h.note && <span style={{color:'var(--text-dim)',marginLeft:8}}>{h.note}</span>}
+                <div style={{fontSize:11,color:'var(--text-dim)'}}>
+                  {h.closed_by || 'system'}{h.created_at ? ` · ${new Date(h.created_at).toLocaleString()}` : ''}
+                </div>
+              </div>
+              <Btn variant="ghost" onClick={()=>reopen(h)} style={{fontSize:11,padding:'4px 10px'}}>Reopen</Btn>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ─── AUDIT TRAIL ───────────────────────────────────────────────────────────────
 function AuditTab() {
   const [rows, setRows] = useState([]);
@@ -2212,6 +2607,7 @@ function AuditTab() {
     a?.includes('confirmed') ? '#22c55e' : '#94a3b8';
   return (
     <div>
+      <CloseBooksCard />
       <div style={{fontSize:13,color:'var(--text-dim)',marginBottom:16}}>Immutable log of money-moving actions — payment collections and remittance status changes.</div>
       {loading ? <Skeleton h={200} /> : (
         <Card style={{padding:0,overflow:'auto'}}>
@@ -2242,10 +2638,771 @@ function AuditTab() {
   );
 }
 
+// ─── BALANCE SHEET ─────────────────────────────────────────────────────────────
+function BalanceSheetTab() {
+  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0,10));
+  const [basis, setBasis] = useState('accrual');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
+
+  const [compare, setCompare] = useState(false);
+  const [prevData, setPrevData] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true); setErr(null);
+    fetch(`${API}/reports/balance-sheet?as_of=${asOf}&basis=${basis}`)
+      .then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); })
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); })
+      .catch(e => setErr(e.message || 'Failed to load balance sheet'))
+      .finally(() => setLoading(false));
+  }, [asOf, basis]);
+  useEffect(() => { load(); }, [load]);
+
+  // Compare mode: prior year-end relative to the as-of date.
+  const prevAsOf = `${(parseInt(asOf.slice(0,4),10)||new Date().getFullYear())-1}-12-31`;
+  useEffect(() => {
+    if (!compare) { setPrevData(null); return; }
+    fetch(`${API}/reports/balance-sheet?as_of=${prevAsOf}&basis=${basis}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setPrevData(d && !d.error ? d : null))
+      .catch(() => setPrevData(null));
+  }, [compare, prevAsOf, basis]);
+
+  const sum = arr => (arr||[]).reduce((s,x)=>s+parseFloat(x.amount||0),0);
+  const cmp = compare && prevData ? prevData : null;
+  const assetRows = cmp ? mergeStmtRows(data?.assets, cmp.assets) : (data?.assets||[]);
+  const liabRows  = cmp ? mergeStmtRows(data?.liabilities, cmp.liabilities) : (data?.liabilities||[]);
+  const eqRows    = cmp ? mergeStmtRows(data?.equity, cmp.equity) : (data?.equity||[]);
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:10,marginBottom:20,alignItems:'center',flexWrap:'wrap'}}>
+        <span style={{fontSize:12,color:'var(--text-dim)'}}>As of</span>
+        <input type="date" value={asOf} onChange={e=>setAsOf(e.target.value)} style={sf} />
+        <BasisToggle basis={basis} onChange={setBasis} />
+        <CompareToggle on={compare} onChange={setCompare} />
+        {compare && <span style={{fontSize:11,color:'var(--text-dim)'}}>vs prior year-end {prevAsOf}</span>}
+        {data && !loading && !err && <BalancedBadge balanced={!!data.balanced} />}
+        {data && !loading && !err && (
+          <span style={{marginLeft:'auto'}}>
+            <Btn variant="ghost" onClick={()=>downloadCsv(`balance_sheet_${basis}_${asOf}.csv`, [
+              ['Quantum Surety — Balance Sheet'],
+              [`As of ${String(data.as_of||asOf).slice(0,10)}`, `${basis} basis`],
+              [],
+              ['Code','Account','Amount'],
+              ['','ASSETS',''],
+              ...(data.assets||[]).map(a=>[a.code,a.name,Number(a.amount||0).toFixed(2)]),
+              ['','Total Assets',Number(data.totals?.assets??sum(data.assets)).toFixed(2)],
+              ['','LIABILITIES',''],
+              ...(data.liabilities||[]).map(a=>[a.code,a.name,Number(a.amount||0).toFixed(2)]),
+              ['','Total Liabilities',sum(data.liabilities).toFixed(2)],
+              ['','EQUITY',''],
+              ...(data.equity||[]).map(a=>[a.code,a.name,Number(a.amount||0).toFixed(2)]),
+              ['','Total Equity',sum(data.equity).toFixed(2)],
+              ['','Total Liabilities & Equity',Number(data.totals?.liabilities_and_equity??(sum(data.liabilities)+sum(data.equity))).toFixed(2)],
+            ])}>Export CSV</Btn>
+          </span>
+        )}
+      </div>
+      {loading && <Skeleton h={440} style={{maxWidth:640,margin:'0 auto'}} />}
+      {!loading && err && <ReportError msg={err} onRetry={load} />}
+      {!loading && !err && data && (
+        <Card style={{maxWidth:cmp?860:640,margin:'0 auto',padding:'28px 36px'}}>
+          <StmtHeader title="Balance Sheet"
+            subtitle={`As of ${String(data.as_of||asOf).slice(0,10)} · ${basis==='cash'?'Cash':'Accrual'} basis${cmp?` · vs ${prevAsOf}`:''}`} />
+          {cmp && <StmtCompareHead />}
+
+          <StmtSection label="Assets" />
+          {assetRows.map(a => <StmtRow key={a.code||a.name} code={a.code} name={a.name} amount={a.amount} prev={cmp?a.prev:undefined} />)}
+          {!assetRows.length && <StmtRow name="No asset activity" amount={0} dim />}
+          <StmtSubtotal name="Total Assets" amount={data.totals?.assets ?? sum(data.assets)}
+            prev={cmp ? (cmp.totals?.assets ?? sum(cmp.assets)) : undefined} />
+
+          <StmtSection label="Liabilities" />
+          {liabRows.map(a => <StmtRow key={a.code||a.name} code={a.code} name={a.name} amount={a.amount} prev={cmp?a.prev:undefined} />)}
+          {!liabRows.length && <StmtRow name="No liabilities" amount={0} dim />}
+          <StmtSubtotal name="Total Liabilities" amount={sum(data.liabilities)} prev={cmp ? sum(cmp.liabilities) : undefined} />
+
+          <StmtSection label="Equity" />
+          {eqRows.map(a => <StmtRow key={a.code||a.name} code={a.code} name={a.name} amount={a.amount} prev={cmp?a.prev:undefined} />)}
+          {!eqRows.length && <StmtRow name="No equity activity" amount={0} dim />}
+          <StmtSubtotal name="Total Equity" amount={sum(data.equity)} prev={cmp ? sum(cmp.equity) : undefined} />
+
+          <StmtTotal name="Total Liabilities & Equity"
+            amount={data.totals?.liabilities_and_equity ?? (sum(data.liabilities)+sum(data.equity))}
+            prev={cmp ? (cmp.totals?.liabilities_and_equity ?? (sum(cmp.liabilities)+sum(cmp.equity))) : undefined} />
+          {!data.balanced && (
+            <div style={{marginTop:12,fontSize:12,color:'#ef4444'}}>
+              ⚠ Assets do not equal liabilities + equity — check journal source data.
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── TRIAL BALANCE ─────────────────────────────────────────────────────────────
+function TrialBalanceTab() {
+  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0,10));
+  const [basis, setBasis] = useState('accrual');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
+
+  const load = useCallback(() => {
+    setLoading(true); setErr(null);
+    fetch(`${API}/reports/trial-balance?as_of=${asOf}&basis=${basis}`)
+      .then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); })
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); })
+      .catch(e => setErr(e.message || 'Failed to load trial balance'))
+      .finally(() => setLoading(false));
+  }, [asOf, basis]);
+  useEffect(() => { load(); }, [load]);
+
+  const rtd = { textAlign:'right', padding:'7px 0', ...TNUMS };
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:10,marginBottom:20,alignItems:'center',flexWrap:'wrap'}}>
+        <span style={{fontSize:12,color:'var(--text-dim)'}}>As of</span>
+        <input type="date" value={asOf} onChange={e=>setAsOf(e.target.value)} style={sf} />
+        <BasisToggle basis={basis} onChange={setBasis} />
+        {data && !loading && !err && <BalancedBadge balanced={!!data.balanced} />}
+        {data && !loading && !err && (
+          <span style={{marginLeft:'auto'}}>
+            <Btn variant="ghost" onClick={()=>downloadCsv(`trial_balance_${basis}_${asOf}.csv`, [
+              ['Quantum Surety — Trial Balance'],
+              [`As of ${String(data.as_of||asOf).slice(0,10)}`, `${basis} basis`],
+              [],
+              ['Code','Account','Debit','Credit'],
+              ...(data.rows||[]).map(r=>[r.code,r.name,Number(r.debit||0)?Number(r.debit).toFixed(2):'',Number(r.credit||0)?Number(r.credit).toFixed(2):'']),
+              ['','Totals',Number(data.totals?.debit||0).toFixed(2),Number(data.totals?.credit||0).toFixed(2)],
+            ])}>Export CSV</Btn>
+          </span>
+        )}
+      </div>
+      {loading && <Skeleton h={380} style={{maxWidth:760,margin:'0 auto'}} />}
+      {!loading && err && <ReportError msg={err} onRetry={load} />}
+      {!loading && !err && data && (
+        <Card style={{maxWidth:760,margin:'0 auto',padding:'28px 36px',overflowX:'auto'}}>
+          <StmtHeader title="Trial Balance"
+            subtitle={`As of ${String(data.as_of||asOf).slice(0,10)} · ${basis==='cash'?'Cash':'Accrual'} basis`} />
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:420}}>
+            <thead>
+              <tr style={{color:'var(--text-dim)',fontSize:11,textTransform:'uppercase',letterSpacing:1}}>
+                <th style={{textAlign:'left',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>Account</th>
+                <th style={{textAlign:'right',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>Debit</th>
+                <th style={{textAlign:'right',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>Credit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data.rows||[]).map(r => (
+                <tr key={r.code} style={{borderBottom:'1px solid var(--border)'}}>
+                  <td style={{padding:'7px 0'}}>
+                    <span style={{color:'var(--text-dim)',fontSize:11,marginRight:10,...TNUMS}}>{r.code}</span>{r.name}
+                  </td>
+                  <td style={{...rtd, paddingLeft:20}}>{parseFloat(r.debit||0) ? fmtMoney(r.debit) : ''}</td>
+                  <td style={{...rtd, paddingLeft:20}}>{parseFloat(r.credit||0) ? fmtMoney(r.credit) : ''}</td>
+                </tr>
+              ))}
+              {!(data.rows||[]).length && (
+                <tr><td colSpan={3} style={{padding:'20px 0',color:'var(--text-dim)',textAlign:'center'}}>No journal activity yet</td></tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr style={{fontWeight:800}}>
+                <td style={{padding:'10px 0',borderTop:'2px solid var(--gold)'}}>Totals</td>
+                <td style={{...rtd,borderTop:'2px solid var(--gold)',color:'var(--gold)',fontWeight:800}}>{fmtMoney(data.totals?.debit)}</td>
+                <td style={{...rtd,borderTop:'2px solid var(--gold)',color:'var(--gold)',fontWeight:800}}>{fmtMoney(data.totals?.credit)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── GENERAL LEDGER ────────────────────────────────────────────────────────────
+function LedgerTab() {
+  const yNow = new Date().getFullYear();
+  const [accounts, setAccounts] = useState([]);
+  const [account, setAccount] = useState('1000');
+  const [from, setFrom] = useState(`${yNow}-01-01`);
+  const [to, setTo] = useState(new Date().toISOString().slice(0,10));
+  const [basis, setBasis] = useState('accrual');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
+
+  useEffect(() => {
+    fetch(`${API}/reports/accounts`).then(r=>r.json()).then(d=>setAccounts(d.accounts||[])).catch(()=>{});
+  }, []);
+
+  const load = useCallback(() => {
+    setLoading(true); setErr(null);
+    fetch(`${API}/reports/general-ledger?account=${account}&from=${from}&to=${to}&basis=${basis}`)
+      .then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); })
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); })
+      .catch(e => setErr(e.message || 'Failed to load ledger'))
+      .finally(() => setLoading(false));
+  }, [account, from, to, basis]);
+  useEffect(() => { load(); }, [load]);
+
+  const acct = accounts.find(a => String(a.code) === String(account));
+  const rtd = { textAlign:'right', padding:'9px 14px', whiteSpace:'nowrap', ...TNUMS };
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:10,marginBottom:20,alignItems:'center',flexWrap:'wrap'}}>
+        <select value={account} onChange={e=>setAccount(e.target.value)} style={{...sf,minWidth:220}}>
+          {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+          {!accounts.length && <option value={account}>{account}</option>}
+        </select>
+        <input type="date" value={from} onChange={e=>setFrom(e.target.value)} style={sf} />
+        <span style={{color:'var(--text-dim)'}}>–</span>
+        <input type="date" value={to} onChange={e=>setTo(e.target.value)} style={sf} />
+        <BasisToggle basis={basis} onChange={setBasis} />
+      </div>
+
+      {loading && <Skeleton h={320} />}
+      {!loading && err && <ReportError msg={err} onRetry={load} />}
+      {!loading && !err && data && (
+        <>
+          <div style={{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap'}}>
+            <Card style={{flex:1,minWidth:160}}>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>Account</div>
+              <div style={{fontSize:16,fontWeight:800}}>{account} {acct ? `· ${acct.name}` : ''}</div>
+              {acct && <div style={{fontSize:11,color:'var(--text-dim)',marginTop:4,textTransform:'capitalize'}}>{acct.type}</div>}
+            </Card>
+            <Card style={{flex:1,minWidth:160}}>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>Opening Balance</div>
+              <div style={{fontSize:22,fontWeight:800,...TNUMS}}>{fmtMoney(data.opening_balance)}</div>
+            </Card>
+            <Card style={{flex:1,minWidth:160}}>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>Closing Balance</div>
+              <div style={{fontSize:22,fontWeight:800,color:'var(--gold)',...TNUMS}}>{fmtMoney(data.closing_balance)}</div>
+            </Card>
+          </div>
+
+          <Card style={{padding:0,overflow:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:640}}>
+              <thead>
+                <tr style={{background:'var(--muted)',color:'var(--text-dim)',fontSize:11,textTransform:'uppercase'}}>
+                  <th style={{textAlign:'left',padding:'10px 14px'}}>Date</th>
+                  <th style={{textAlign:'left',padding:'10px 14px'}}>Source</th>
+                  <th style={{textAlign:'left',padding:'10px 14px'}}>Description</th>
+                  <th style={{textAlign:'right',padding:'10px 14px'}}>Debit</th>
+                  <th style={{textAlign:'right',padding:'10px 14px'}}>Credit</th>
+                  <th style={{textAlign:'right',padding:'10px 14px'}}>Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{borderTop:'1px solid var(--border)',background:'var(--muted)'}}>
+                  <td style={{padding:'9px 14px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{from}</td>
+                  <td colSpan={4} style={{padding:'9px 14px',fontStyle:'italic',color:'var(--text-dim)'}}>Opening balance</td>
+                  <td style={{...rtd,fontWeight:700}}>{fmtMoney(data.opening_balance)}</td>
+                </tr>
+                {(data.lines||[]).map((l,i) => (
+                  <tr key={i} style={{borderTop:'1px solid var(--border)'}}>
+                    <td style={{padding:'9px 14px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{String(l.date||'').slice(0,10)}</td>
+                    <td style={{padding:'9px 14px',color:'var(--text-dim)',fontSize:12}}>{l.source}</td>
+                    <td style={{padding:'9px 14px',maxWidth:320,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.description}>{l.description}</td>
+                    <td style={rtd}>{parseFloat(l.debit||0) ? fmtMoney(l.debit) : ''}</td>
+                    <td style={rtd}>{parseFloat(l.credit||0) ? fmtMoney(l.credit) : ''}</td>
+                    <td style={{...rtd,color:parseFloat(l.balance||0)<0?'#ef4444':'white'}}>{fmtMoney(l.balance)}</td>
+                  </tr>
+                ))}
+                {!(data.lines||[]).length && (
+                  <tr style={{borderTop:'1px solid var(--border)'}}>
+                    <td colSpan={6} style={{padding:'20px 14px',color:'var(--text-dim)',textAlign:'center'}}>No activity in period</td>
+                  </tr>
+                )}
+                <tr style={{borderTop:'2px solid var(--gold)',fontWeight:800}}>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{to}</td>
+                  <td colSpan={4} style={{padding:'10px 14px'}}>Closing balance</td>
+                  <td style={{...rtd,color:'var(--gold)',fontWeight:800}}>{fmtMoney(data.closing_balance)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── A/R AGING (rendered inside the Payments tab) ─────────────────────────────
+const AR_BUCKETS = [
+  { label:'Current',  keys:['current'], color:'#22c55e' },
+  { label:'1–30',     keys:['1-30','1_30','d1_30','days_1_30','b1_30'], color:'#f59e0b' },
+  { label:'31–60',    keys:['31-60','31_60','d31_60','days_31_60','b31_60'], color:'#f97316' },
+  { label:'61–90',    keys:['61-90','61_90','d61_90','days_61_90','b61_90'], color:'#ef4444' },
+  { label:'Over 90',  keys:['over_90','over90','90+','d90_plus','days_over_90','b90_plus'], color:'#dc2626' },
+];
+const pickBucket = (o, keys) => {
+  for (const k of keys) if (o && o[k] !== undefined && o[k] !== null) return parseFloat(o[k]) || 0;
+  return 0;
+};
+
+function ARAgingView() {
+  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0,10));
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const sf = { background:'var(--muted)',border:'1px solid var(--border)',borderRadius:6,padding:'7px 10px',color:'white',fontSize:13 };
+
+  const load = useCallback(() => {
+    setLoading(true); setErr(null);
+    fetch(`${API}/reports/ar-aging?as_of=${asOf}`)
+      .then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); })
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); })
+      .catch(e => setErr(e.message || 'Failed to load A/R aging'))
+      .finally(() => setLoading(false));
+  }, [asOf]);
+  useEffect(() => { load(); }, [load]);
+
+  const rows = data?.rows || [];
+  const totals = data?.totals || {};
+  const grandTotal = totals.total !== undefined ? parseFloat(totals.total)||0
+    : AR_BUCKETS.reduce((s,b)=>s+pickBucket(totals,b.keys),0);
+  const rowTotal = r => r.total !== undefined ? parseFloat(r.total)||0
+    : AR_BUCKETS.reduce((s,b)=>s+pickBucket(r,b.keys),0);
+  const rtd = { textAlign:'right', padding:'9px 14px', whiteSpace:'nowrap', ...TNUMS };
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <span style={{fontSize:12,color:'var(--text-dim)'}}>As of</span>
+        <input type="date" value={asOf} onChange={e=>setAsOf(e.target.value)} style={sf} />
+        <span style={{fontSize:11,color:'var(--text-dim)'}}>
+          Unpaid bond balances (premium − collected), aged vs a net-30 due date: "1–30" = 1–30 days PAST due (31–60 days since effective date) · ties to Balance Sheet A/R (1100, accrual)
+        </span>
+      </div>
+
+      {loading && <Skeleton h={280} />}
+      {!loading && err && <ReportError msg={err} onRetry={load} />}
+      {!loading && !err && data && (
+        <>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12,marginBottom:20}}>
+            {AR_BUCKETS.map(b => {
+              const v = pickBucket(totals, b.keys);
+              return (
+                <Card key={b.label} style={{borderColor:v>0?(b.color+'55'):'var(--border)'}}>
+                  <div style={{fontSize:11,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1,marginBottom:4}}>{b.label}</div>
+                  <div style={{fontSize:20,fontWeight:800,color:v>0?b.color:'var(--text-dim)',...TNUMS}}>${fmtMoney(v)}</div>
+                </Card>
+              );
+            })}
+            <Card style={{background:'var(--muted)'}}>
+              <div style={{fontSize:11,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:1,marginBottom:4}}>Total A/R</div>
+              <div style={{fontSize:20,fontWeight:800,color:'var(--gold)',...TNUMS}}>${fmtMoney(grandTotal)}</div>
+            </Card>
+          </div>
+
+          <Card style={{padding:0,overflow:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:680}}>
+              <thead>
+                <tr style={{background:'var(--muted)',color:'var(--text-dim)',fontSize:11,textTransform:'uppercase'}}>
+                  <th style={{textAlign:'left',padding:'10px 14px'}}>Insured</th>
+                  {AR_BUCKETS.map(b => <th key={b.label} style={{textAlign:'right',padding:'10px 14px'}}>{b.label}</th>)}
+                  <th style={{textAlign:'right',padding:'10px 14px'}}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r,i) => (
+                  <tr key={r.insured_name||i} style={{borderTop:'1px solid var(--border)'}}>
+                    <td style={{padding:'9px 14px'}}>{r.insured_name}</td>
+                    {AR_BUCKETS.map(b => {
+                      const v = pickBucket(r, b.keys);
+                      return <td key={b.label} style={{...rtd,color:v>0?'white':'var(--text-dim)'}}>{v ? fmtMoney(v) : ''}</td>;
+                    })}
+                    <td style={{...rtd,fontWeight:700,color:'var(--gold)'}}>{fmtMoney(rowTotal(r))}</td>
+                  </tr>
+                ))}
+                {!rows.length && (
+                  <tr><td colSpan={7} style={{padding:'24px 14px',color:'var(--text-dim)',textAlign:'center'}}>No outstanding receivables</td></tr>
+                )}
+                {rows.length > 0 && (
+                  <tr style={{borderTop:'2px solid var(--gold)',fontWeight:800}}>
+                    <td style={{padding:'10px 14px'}}>Totals</td>
+                    {AR_BUCKETS.map(b => (
+                      <td key={b.label} style={{...rtd,fontWeight:800}}>{fmtMoney(pickBucket(totals,b.keys))}</td>
+                    ))}
+                    <td style={{...rtd,fontWeight:800,color:'var(--gold)'}}>{fmtMoney(grandTotal)}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── BANK RECONCILIATION ───────────────────────────────────────────────────────
+const BANK_ACCOUNTS = [
+  { code:'1000', name:'Trust Bank Account' },
+  { code:'1010', name:'Operating Bank Account' },
+];
+const RECON_STATUS_COLORS = { in_progress:'#f59e0b', completed:'#22c55e' };
+
+function ReconcileTab() {
+  const [recons, setRecons] = useState([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [listErr, setListErr] = useState(null);
+  const [showStart, setShowStart] = useState(false);
+  const [startForm, setStartForm] = useState({ account_code:'1000', statement_date:new Date().toISOString().slice(0,10), ending_balance:'' });
+  const [activeId, setActiveId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailErr, setDetailErr] = useState(null);
+  const [busyKey, setBusyKey] = useState(null);
+
+  const loadList = useCallback(() => {
+    setListLoading(true); setListErr(null);
+    fetch(`${API}/recon`)
+      .then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); })
+      .then(d => setRecons(Array.isArray(d) ? d : (d.reconciliations || d.recons || [])))
+      .catch(e => setListErr(e.message || 'Failed to load reconciliations'))
+      .finally(() => setListLoading(false));
+  }, []);
+  useEffect(() => { loadList(); }, [loadList]);
+
+  const loadDetail = useCallback((id) => {
+    setDetailLoading(true); setDetailErr(null);
+    fetch(`${API}/recon/${id}`)
+      .then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); })
+      .then(d => { if (d.error) throw new Error(d.error); setDetail(d); })
+      .catch(e => setDetailErr(e.message || 'Failed to load reconciliation'))
+      .finally(() => setDetailLoading(false));
+  }, []);
+  useEffect(() => { if (activeId) loadDetail(activeId); else setDetail(null); }, [activeId, loadDetail]);
+
+  const start = async () => {
+    try {
+      const r = await fetch(`${API}/recon`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(startForm) });
+      const d = await r.json();
+      if (d.error) { alert(d.error); return; }
+      setShowStart(false);
+      setStartForm(f => ({ ...f, ending_balance:'' }));
+      loadList();
+      const id = d.id ?? d.recon?.id;
+      if (id) setActiveId(id);
+    } catch { alert('Failed to start reconciliation'); }
+  };
+
+  const toggle = async (lineKey) => {
+    if (busyKey) return;
+    setBusyKey(lineKey);
+    try {
+      const r = await fetch(`${API}/recon/${activeId}/toggle`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ line_key: lineKey }) });
+      const d = await r.json().catch(()=>({}));
+      if (d.error) alert(d.error);
+    } catch { alert('Failed to toggle line'); }
+    setBusyKey(null);
+    loadDetail(activeId);
+  };
+
+  const complete = async () => {
+    if (!window.confirm('Complete this reconciliation? Cleared lines will be locked.')) return;
+    try {
+      const r = await fetch(`${API}/recon/${activeId}/complete`, { method:'PUT' });
+      const d = await r.json().catch(()=>({}));
+      if (d.error) { alert(d.error); return; }
+      loadDetail(activeId); loadList();
+    } catch { alert('Failed to complete reconciliation'); }
+  };
+
+  const del = async (id) => {
+    if (!window.confirm('Delete this in-progress reconciliation?')) return;
+    try {
+      const r = await fetch(`${API}/recon/${id}`, { method:'DELETE' });
+      const d = await r.json().catch(()=>({}));
+      if (d.error) { alert(d.error); return; }
+      if (activeId === id) setActiveId(null);
+      loadList();
+    } catch { alert('Failed to delete reconciliation'); }
+  };
+
+  const reopen = async (id) => {
+    if (!window.confirm('Reopen this completed reconciliation? Its cleared lines become editable again.')) return;
+    try {
+      const r = await fetch(`${API}/recon/${id}/reopen`, { method:'PUT' });
+      const d = await r.json().catch(()=>({}));
+      if (d.error) { alert(d.error); return; }
+      loadList();
+      if (activeId === id) loadDetail(id); else setActiveId(id);
+    } catch { alert('Failed to reopen reconciliation'); }
+  };
+
+  // Client-side reconciliation report CSV — statement/cleared/difference
+  // totals plus the cleared line detail, built from GET /recon/:id.
+  const exportRecon = async (rc) => {
+    try {
+      const r = await fetch(`${API}/recon/${rc.id}`);
+      if (!r.ok) throw new Error(`Export failed (${r.status})`);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      const rec = d.recon || rc;
+      const clearedLines = (d.lines||[]).filter(l => l.cleared);
+      downloadCsv(`reconciliation_${rec.account_code}_${String(rec.statement_date||'').slice(0,10)}.csv`, [
+        ['Quantum Surety — Bank Reconciliation Report'],
+        ['Account', `${rec.account_code} — ${acctName(rec.account_code)}`],
+        ['Statement Date', String(rec.statement_date||'').slice(0,10)],
+        ['Status', rec.status],
+        [],
+        ['Statement Ending Balance', Number(rec.ending_balance||0).toFixed(2)],
+        ['Prior Reconciled Balance', Number(d.prior_reconciled_balance||0).toFixed(2)],
+        ['Cleared This Reconciliation', Number(d.cleared_total||0).toFixed(2)],
+        ['Difference', Number(d.difference||0).toFixed(2)],
+        [],
+        ['Cleared Lines'],
+        ['Date','Source','Description','Debit','Credit'],
+        ...clearedLines.map(l => [
+          String(l.date||l.entry_date||'').slice(0,10),
+          l.source || l.source_table || '',
+          l.description || '',
+          parseFloat(l.debit||0) ? Number(l.debit).toFixed(2) : '',
+          parseFloat(l.credit||0) ? Number(l.credit).toFixed(2) : '',
+        ]),
+      ]);
+    } catch (e) { alert(e.message || 'Failed to export reconciliation report'); }
+  };
+
+  // Adjustment entries (bank fees, interest, opening balances): a balanced
+  // two-line manual journal — one leg on this bank account, one on an offset
+  // account — so real statement items missing from the books can be added
+  // mid-reconcile and the difference can actually reach 0.00.
+  const [showAdj, setShowAdj] = useState(false);
+  const [accounts, setAccounts] = useState([]);
+  const [adjForm, setAdjForm] = useState({ entry_date:new Date().toISOString().slice(0,10), amount:'', direction:'out', offset_code:'', memo:'' });
+  useEffect(() => {
+    fetch(`${API}/reports/accounts`).then(r=>r.json()).then(d=>setAccounts(d.accounts||[])).catch(()=>{});
+  }, []);
+
+  const saveAdj = async () => {
+    const amt = Math.round(parseFloat(adjForm.amount) * 100) / 100;
+    if (!amt || amt <= 0) { alert('Amount must be a positive number'); return; }
+    if (!adjForm.offset_code) { alert('Pick an offset account'); return; }
+    const bankCode = recon.account_code;
+    const bankName = acctName(bankCode);
+    const offset = accounts.find(a => a.code === adjForm.offset_code);
+    const bankLine   = { account_code: bankCode, debit: adjForm.direction === 'in' ? amt : 0, credit: adjForm.direction === 'in' ? 0 : amt, description: adjForm.memo || 'Reconciliation adjustment' };
+    const offsetLine = { account_code: offset.code, debit: adjForm.direction === 'in' ? 0 : amt, credit: adjForm.direction === 'in' ? amt : 0, description: adjForm.memo || `Adjustment vs ${bankName}` };
+    try {
+      const r = await fetch(`${API}/journal`, { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ entry_date: adjForm.entry_date, memo: adjForm.memo || 'Reconciliation adjustment', basis:'both', lines:[bankLine, offsetLine] }) });
+      const d = await r.json().catch(()=>({}));
+      if (d.error) { alert(d.error); return; }
+      setShowAdj(false);
+      setAdjForm(f => ({ ...f, amount:'', memo:'' }));
+      loadDetail(activeId);
+    } catch { alert('Failed to save adjustment'); }
+  };
+
+  const acctName = code => BANK_ACCOUNTS.find(a=>a.code===String(code))?.name || code;
+  const recon = detail?.recon || null;
+  const diff = detail ? parseFloat(detail.difference || 0) : 0;
+  const isZero = detail ? Math.abs(diff) < 0.005 : false;
+  const inProgress = recon?.status === 'in_progress';
+  const rtd = { textAlign:'right', padding:'8px 14px', whiteSpace:'nowrap', ...TNUMS };
+  const lineKeyOf = l => l.line_key || `${l.source_table}:${l.source_id}:${l.line_no}`;
+
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:8}}>
+        <div style={{fontSize:13,color:'var(--text-dim)'}}>
+          Match book entries against your bank statement — complete when the difference hits $0.00.
+        </div>
+        <Btn onClick={()=>setShowStart(true)}>+ Start Reconciliation</Btn>
+      </div>
+
+      {/* Active reconciliation detail */}
+      {activeId && detailLoading && <Skeleton h={280} style={{marginBottom:20}} />}
+      {activeId && !detailLoading && detailErr && <ReportError msg={detailErr} onRetry={()=>loadDetail(activeId)} />}
+      {activeId && !detailLoading && !detailErr && detail && recon && (
+        <Card style={{marginBottom:20, borderColor: isZero ? '#22c55e55' : '#f59e0b55'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+            <div style={{fontSize:14,fontWeight:700}}>
+              {acctName(recon.account_code)} · statement {String(recon.statement_date||'').slice(0,10)}
+            </div>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <Badge label={recon.status==='in_progress'?'In Progress':'Completed'} color={RECON_STATUS_COLORS[recon.status]||'#94a3b8'} />
+              {inProgress && <Btn variant="ghost" onClick={()=>setShowAdj(true)} style={{fontSize:12,padding:'6px 12px'}}>+ Adjustment</Btn>}
+              {inProgress && <Btn onClick={complete} disabled={!isZero}
+                style={{background:isZero?'#22c55e':'var(--muted)',color:isZero?'#0a0f1e':'var(--text-dim)'}}>✓ Complete</Btn>}
+              {inProgress && <Btn variant="danger" onClick={()=>del(recon.id)} style={{fontSize:12,padding:'6px 12px'}}>Delete</Btn>}
+              {recon.status==='completed' && <Btn variant="ghost" onClick={()=>reopen(recon.id)} style={{fontSize:12,padding:'6px 12px'}}>Reopen</Btn>}
+              <Btn variant="ghost" onClick={()=>setActiveId(null)} style={{fontSize:12,padding:'6px 12px'}}>Close</Btn>
+            </div>
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:14,marginBottom:16}}>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Statement Ending Balance</div>
+              <div style={{fontSize:18,fontWeight:700,...TNUMS}}>{fmtMoney(recon.ending_balance)}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Prior Reconciled Balance</div>
+              <div style={{fontSize:18,fontWeight:700,...TNUMS}}>{fmtMoney(detail.prior_reconciled_balance)}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Cleared This Recon</div>
+              <div style={{fontSize:18,fontWeight:700,color:'var(--gold)',...TNUMS}}>{fmtMoney(detail.cleared_total)}</div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Difference</div>
+              <div style={{fontSize:22,fontWeight:800,color:isZero?'#22c55e':'#f59e0b',...TNUMS}}>
+                {isZero ? '✓ 0.00' : fmtMoney(diff)}
+              </div>
+              {!isZero && <div style={{fontSize:10,color:'var(--text-dim)'}}>clear lines until this reads 0.00</div>}
+            </div>
+          </div>
+
+          <div style={{border:'1px solid var(--border)',borderRadius:8,overflow:'auto',maxHeight:420}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:640}}>
+              <thead>
+                <tr style={{background:'var(--muted)',color:'var(--text-dim)',fontSize:11,textTransform:'uppercase',position:'sticky',top:0}}>
+                  <th style={{textAlign:'center',padding:'8px 10px',width:40}}>✓</th>
+                  <th style={{textAlign:'left',padding:'8px 14px'}}>Date</th>
+                  <th style={{textAlign:'left',padding:'8px 14px'}}>Source</th>
+                  <th style={{textAlign:'left',padding:'8px 14px'}}>Description</th>
+                  <th style={{textAlign:'right',padding:'8px 14px'}}>Debit</th>
+                  <th style={{textAlign:'right',padding:'8px 14px'}}>Credit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(detail.lines||[]).map((l,i) => {
+                  const key = lineKeyOf(l);
+                  const cleared = !!l.cleared;
+                  const locked = !!(l.locked || l.cleared_in_completed);
+                  return (
+                    <tr key={key||i} style={{borderTop:'1px solid var(--border)',opacity:locked?0.55:1,
+                      background:cleared?'rgba(34,197,94,0.05)':'transparent'}}>
+                      <td style={{textAlign:'center',padding:'7px 10px'}}>
+                        <input type="checkbox" checked={cleared}
+                          disabled={!inProgress || locked || busyKey===key}
+                          onChange={()=>toggle(key)} style={{cursor: inProgress&&!locked?'pointer':'not-allowed',accentColor:'#22c55e'}} />
+                      </td>
+                      <td style={{padding:'7px 14px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{String(l.entry_date||l.date||'').slice(0,10)}</td>
+                      <td style={{padding:'7px 14px',color:'var(--text-dim)',fontSize:12}}>{l.source_table||l.source}</td>
+                      <td style={{padding:'7px 14px',maxWidth:300,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.description}>{l.description}</td>
+                      <td style={rtd}>{parseFloat(l.debit||0) ? fmtMoney(l.debit) : ''}</td>
+                      <td style={rtd}>{parseFloat(l.credit||0) ? fmtMoney(l.credit) : ''}</td>
+                    </tr>
+                  );
+                })}
+                {!(detail.lines||[]).length && (
+                  <tr><td colSpan={6} style={{padding:'20px 14px',color:'var(--text-dim)',textAlign:'center'}}>No journal lines for this account</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* History */}
+      {listLoading && <Skeleton h={160} />}
+      {!listLoading && listErr && <ReportError msg={listErr} onRetry={loadList} />}
+      {!listLoading && !listErr && (
+        <Card style={{padding:0,overflow:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:560}}>
+            <thead>
+              <tr style={{background:'var(--muted)',color:'var(--text-dim)',fontSize:11,textTransform:'uppercase'}}>
+                {['Account','Statement Date','Ending Balance','Status','Completed',''].map(h=>(
+                  <th key={h} style={{textAlign:'left',padding:'10px 14px'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recons.map(rc => (
+                <tr key={rc.id} style={{borderTop:'1px solid var(--border)'}}>
+                  <td style={{padding:'10px 14px'}}>{acctName(rc.account_code)}</td>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>{String(rc.statement_date||'').slice(0,10)}</td>
+                  <td style={{padding:'10px 14px',color:'var(--gold)',...TNUMS}}>{fmtMoney(rc.ending_balance)}</td>
+                  <td style={{padding:'10px 14px'}}>
+                    <Badge label={rc.status==='in_progress'?'In Progress':'Completed'} color={RECON_STATUS_COLORS[rc.status]||'#94a3b8'} />
+                  </td>
+                  <td style={{padding:'10px 14px',color:'var(--text-dim)',whiteSpace:'nowrap'}}>
+                    {rc.completed_at ? new Date(rc.completed_at).toLocaleDateString() : '—'}
+                  </td>
+                  <td style={{padding:'10px 14px'}}>
+                    <Btn variant="ghost" onClick={()=>setActiveId(rc.id)} style={{fontSize:11,padding:'4px 10px',marginRight:4}}>Open</Btn>
+                    {rc.status==='in_progress' && <Btn variant="danger" onClick={()=>del(rc.id)} style={{fontSize:11,padding:'4px 10px'}}>Delete</Btn>}
+                    {rc.status==='completed' && <Btn variant="ghost" onClick={()=>exportRecon(rc)} style={{fontSize:11,padding:'4px 10px',marginRight:4}}>Export CSV</Btn>}
+                    {rc.status==='completed' && <Btn variant="ghost" onClick={()=>reopen(rc.id)} style={{fontSize:11,padding:'4px 10px'}}>Reopen</Btn>}
+                  </td>
+                </tr>
+              ))}
+              {!recons.length && (
+                <tr><td colSpan={6} style={{padding:'24px 14px',color:'var(--text-dim)',textAlign:'center'}}>No reconciliations yet — start one above</td></tr>
+              )}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {showAdj && recon && (
+        <Modal title={`Adjustment — ${acctName(recon.account_code)}`} onClose={()=>setShowAdj(false)}>
+          <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:14}}>
+            Record a statement item the books are missing (bank fee, interest, opening balance) as a balanced journal entry.
+          </div>
+          <FInput label="Date" type="date" value={adjForm.entry_date}
+            onChange={e=>setAdjForm(f=>({...f,entry_date:e.target.value}))} />
+          <FInput label="Amount ($)" type="number" step="0.01" min="0" value={adjForm.amount}
+            onChange={e=>setAdjForm(f=>({...f,amount:e.target.value}))} />
+          <FSelect label="Direction" value={adjForm.direction}
+            onChange={e=>setAdjForm(f=>({...f,direction:e.target.value}))}
+            options={[
+              {value:'out', label:`Money OUT of ${acctName(recon.account_code)} (fee, charge, draw)`},
+              {value:'in',  label:`Money INTO ${acctName(recon.account_code)} (interest, deposit)`},
+            ]} />
+          <FSelect label="Offset Account" value={adjForm.offset_code}
+            onChange={e=>setAdjForm(f=>({...f,offset_code:e.target.value}))}
+            options={[
+              {value:'', label:'Select account'},
+              ...accounts.filter(a=>a.code!==recon.account_code)
+                .map(a=>({value:a.code, label:`${a.code} — ${a.name} (${a.type})`})),
+            ]} />
+          <FInput label="Memo" value={adjForm.memo} placeholder="e.g. Monthly service charge"
+            onChange={e=>setAdjForm(f=>({...f,memo:e.target.value}))} />
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+            <Btn variant="ghost" onClick={()=>setShowAdj(false)}>Cancel</Btn>
+            <Btn onClick={saveAdj} disabled={!adjForm.amount||!adjForm.offset_code}>Save Adjustment</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {showStart && (
+        <Modal title="Start Bank Reconciliation" onClose={()=>setShowStart(false)}>
+          <FSelect label="Account" value={startForm.account_code}
+            onChange={e=>setStartForm(f=>({...f,account_code:e.target.value}))}
+            options={BANK_ACCOUNTS.map(a=>({value:a.code,label:`${a.code} — ${a.name}`}))} />
+          <FInput label="Statement Date" type="date" value={startForm.statement_date}
+            onChange={e=>setStartForm(f=>({...f,statement_date:e.target.value}))} />
+          <FInput label="Statement Ending Balance ($)" type="number" step="0.01" value={startForm.ending_balance}
+            onChange={e=>setStartForm(f=>({...f,ending_balance:e.target.value}))} />
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+            <Btn variant="ghost" onClick={()=>setShowStart(false)}>Cancel</Btn>
+            <Btn onClick={start} disabled={!startForm.account_code||!startForm.statement_date||startForm.ending_balance===''}>Start</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // Tab groups for the two-level nav. Each entry maps a group label to its tabs.
 const TAB_GROUPS = [
-  { group: 'Insights',   tabs: ['Dashboard','P&L','Budget','Reports'] },
-  { group: 'Money In',   tabs: ['Bonds','Payments','Trust Account','Remittances','Carriers'] },
+  { group: 'Insights',   tabs: ['Dashboard','P&L','Balance Sheet','Trial Balance','Ledger','Budget','Reports'] },
+  { group: 'Money In',   tabs: ['Bonds','Payments','Trust Account','Remittances','Carriers','Reconcile'] },
   { group: 'Money Out',  tabs: ['Expenses','Bills','Recurring'] },
   { group: 'Compliance', tabs: ['Tax','1099','Alerts','Audit'] },
 ];
@@ -2255,6 +3412,26 @@ export default function Bookkeeping() {
   const [carriers, setCarriers] = useState([]);
   // Status filter handed to BondsTab when the user drills in from the dashboard.
   const [bondDrill, setBondDrill] = useState(undefined);
+  // 409 "period closed through …" banner — surfaced from ANY tab. Wraps the
+  // page's fetch (on top of the app's auth monkey-patch) so every mutation
+  // handler gets the readable message without touching each call site.
+  const [closedErr, setClosedErr] = useState(null);
+
+  useEffect(() => {
+    const orig = window.fetch;
+    window.fetch = async (...args) => {
+      const r = await orig(...args);
+      try {
+        const u = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+        if (r.status === 409 && u.includes('/api/bookkeeping')) {
+          const d = await r.clone().json();
+          if (d?.error && /period closed/i.test(d.error)) setClosedErr(d.error);
+        }
+      } catch {}
+      return r;
+    };
+    return () => { window.fetch = orig; };
+  }, []);
 
   const loadCarriers = useCallback(() => {
     fetch(`${API}/carriers`).then(r=>r.json()).then(setCarriers).catch(()=>{});
@@ -2274,6 +3451,16 @@ export default function Bookkeeping() {
         <h1 style={{margin:'0 0 4px',fontSize:22,fontWeight:800}}>Bookkeeping</h1>
         <div style={{fontSize:13,color:'var(--text-dim)'}}>Bond premiums · commissions · carrier remittances · trust ledger</div>
       </div>
+
+      {closedErr && (
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,
+          background:'rgba(239,68,68,0.08)',border:'1px solid #ef444455',borderRadius:8,
+          padding:'10px 16px',marginBottom:16,fontSize:13,color:'#ef4444'}}>
+          <span>⚠ {closedErr} — the books are closed for that date. Reopen or move the closing date under Compliance → Audit to edit this period.</span>
+          <button onClick={()=>setClosedErr(null)}
+            style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:16,lineHeight:1}}>×</button>
+        </div>
+      )}
 
       {/* Level 1: group tabs */}
       <div style={{display:'flex',gap:4,marginBottom:0,flexWrap:'wrap'}}>
@@ -2317,6 +3504,10 @@ export default function Bookkeeping() {
       {tab==='Expenses'      && <ExpensesTab />}
       {tab==='Bills'         && <BillsTab />}
       {tab==='P&L'           && <PLTab />}
+      {tab==='Balance Sheet' && <BalanceSheetTab />}
+      {tab==='Trial Balance' && <TrialBalanceTab />}
+      {tab==='Ledger'        && <LedgerTab />}
+      {tab==='Reconcile'     && <ReconcileTab />}
       {tab==='Tax'           && <TaxTab />}
       {tab==='Reports'       && <ReportsTab />}
       {tab==='Alerts'        && <AlertsTab />}

@@ -7,7 +7,7 @@ export const dripRouter = Router();
 
 const APP_URL = process.env.APP_URL || 'https://quantumsurety.bond';
 
-// Weekday gate — skip Saturday (6) and Sunday (0) unless DRIP_ALL_DAYS=true
+// Weekday gate â€” skip Saturday (6) and Sunday (0) unless DRIP_ALL_DAYS=true
 function isWeekday() {
   if (process.env.DRIP_ALL_DAYS === 'true') return true;
   const now = new Date();
@@ -69,7 +69,7 @@ dripRouter.delete('/:id', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// Run drip — called by cron 4x/day at 9, 10, 11, 12 CDT
+// Run drip â€” called by cron 4x/day at 9, 10, 11, 12 CDT
 dripRouter.post('/run', async (req, res) => {
   // Skip weekends to protect SES reputation and focus sends on business days
   if (!isWeekday()) {
@@ -102,7 +102,7 @@ dripRouter.post('/run', async (req, res) => {
       const limit = Math.ceil((schedule.emails_per_day || 100) / 4);
       let contacts = [];
 
-      // ── NOTARY ────────────────────────────────────────────────────────────
+      // â”€â”€ NOTARY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (schedule.contact_type === 'notary') {
         const suretyPct  = filters.surety ? `%${filters.surety}%` : null;
         const cityPct    = filters.city   ? `%${filters.city}%`   : null;
@@ -119,7 +119,7 @@ dripRouter.post('/run', async (req, res) => {
         const result = await db.execute(sql`
           SELECT id, notary_id, first_name, last_name, email, expire_date, surety_company FROM notaries
           WHERE email != '' AND email IS NOT NULL
-          AND email NOT IN (SELECT email FROM unsubscribes)
+          AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
           AND email NOT IN (
             SELECT email FROM notary_campaign_sends
             WHERE drip_id = ${schedule.id}
@@ -132,14 +132,14 @@ dripRouter.post('/run', async (req, res) => {
         `);
         contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
 
-      // ── NOTARY FOLLOW-UP ──────────────────────────────────────────────────
+      // â”€â”€ NOTARY FOLLOW-UP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       } else if (schedule.contact_type === 'notary_followup') {
         const result = await db.execute(sql`
           SELECT DISTINCT ON (n.email)
             n.id, n.first_name, n.last_name, n.email, n.expire_date, n.surety_company
           FROM notaries n
           WHERE n.email != '' AND n.email IS NOT NULL
-          AND n.email NOT IN (SELECT email FROM unsubscribes)
+          AND LOWER(n.email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
           AND n.email IN (
             SELECT email FROM notary_campaign_sends
             WHERE status = 'sent' AND is_auto = false
@@ -161,7 +161,7 @@ dripRouter.post('/run', async (req, res) => {
         `);
         contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
 
-      // ── DEALER ────────────────────────────────────────────────────────────
+      // â”€â”€ DEALER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       } else if (schedule.contact_type === 'dealer') {
         const cityPct    = filters.city         ? `%${filters.city}%`         : null;
         const countyPct  = filters.county       ? `%${filters.county}%`       : null;
@@ -181,7 +181,7 @@ dripRouter.post('/run', async (req, res) => {
                  license_type, city, county
           FROM auto_dealers
           WHERE email != '' AND email IS NOT NULL
-          AND email NOT IN (SELECT email FROM unsubscribes)
+          AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
           AND id NOT IN (
             SELECT dealer_id FROM dealer_campaign_sends
             WHERE drip_id = ${schedule.id}
@@ -200,7 +200,7 @@ dripRouter.post('/run', async (req, res) => {
           _type: 'dealer',
         }));
 
-      // ── DEALER FOLLOW-UP ──────────────────────────────────────────────────
+      // â”€â”€ DEALER FOLLOW-UP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       } else if (schedule.contact_type === 'dealer_followup') {
         const result = await db.execute(sql`
           SELECT DISTINCT ON (d.email)
@@ -208,7 +208,7 @@ dripRouter.post('/run', async (req, res) => {
             d.license_type, d.city, d.county
           FROM auto_dealers d
           WHERE d.email != '' AND d.email IS NOT NULL
-          AND d.email NOT IN (SELECT email FROM unsubscribes)
+          AND LOWER(d.email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
           AND d.id IN (
             SELECT dealer_id FROM dealer_campaign_sends
             WHERE status = 'sent' AND is_auto = false
@@ -236,7 +236,7 @@ dripRouter.post('/run', async (req, res) => {
           _type: 'dealer',
         }));
 
-      // ── LAPSED NOTARY (bond already expired) ─────────────────────────────
+      // â”€â”€ LAPSED NOTARY (bond already expired) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       } else if (schedule.contact_type === 'lapsed_notary') {
         const cityPct  = filters.city ? `%${filters.city}%` : null;
         const cityCond = cityPct ? sql`AND city ILIKE ${cityPct}` : sql``;
@@ -245,7 +245,7 @@ dripRouter.post('/run', async (req, res) => {
           WHERE email != '' AND email IS NOT NULL
           AND expire_date < CURRENT_DATE
           AND expire_date > CURRENT_DATE - INTERVAL '2 years'
-          AND email NOT IN (SELECT email FROM unsubscribes)
+          AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
           AND email NOT IN (
             SELECT email FROM notary_campaign_sends
             WHERE drip_id = ${schedule.id}
@@ -258,14 +258,14 @@ dripRouter.post('/run', async (req, res) => {
         `);
         contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
 
-      // ── NOTARY OPENER FOLLOW-UP (opened email in last 30d) ────────────────
+      // â”€â”€ NOTARY OPENER FOLLOW-UP (opened email in last 30d) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       } else if (schedule.contact_type === 'notary_opener') {
         const result = await db.execute(sql`
           SELECT DISTINCT ON (n.email)
             n.id, n.first_name, n.last_name, n.email, n.expire_date, n.surety_company
           FROM notaries n
           WHERE n.email != '' AND n.email IS NOT NULL
-          AND n.email NOT IN (SELECT email FROM unsubscribes)
+          AND LOWER(n.email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
           AND n.email IN (
             SELECT contact_email FROM email_events
             WHERE event_type = 'email.opened'
@@ -282,7 +282,7 @@ dripRouter.post('/run', async (req, res) => {
         `);
         contacts = result.rows.map(r => ({ ...r, _type: 'notary' }));
 
-      // ── CONTRACTOR ────────────────────────────────────────────────────────
+      // â”€â”€ CONTRACTOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       } else if (schedule.contact_type === 'contractor') {
         const stateCond = filters.state ? sql`AND state = ${filters.state}` : sql``;
         const certCond  = filters.cert_type ? sql`AND certification_type ILIKE ${'%' + filters.cert_type + '%'}` : sql``;
@@ -291,7 +291,7 @@ dripRouter.post('/run', async (req, res) => {
                  null::date as expire_date, certification_type as surety_company, city
           FROM contractors
           WHERE email IS NOT NULL AND email != ''
-          AND email NOT IN (SELECT email FROM unsubscribes)
+          AND LOWER(email) NOT IN (SELECT LOWER(email) FROM unsubscribes)
           AND email NOT IN (
             SELECT contact_email FROM email_events
             WHERE contact_type = 'contractor' AND event_type = 'email.sent'
@@ -392,7 +392,7 @@ dripRouter.post('/run', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// Daily alert — notaries expiring in 30 days
+// Daily alert â€” notaries expiring in 30 days
 dripRouter.post('/alert', async (req, res) => {
   if (!isWeekday()) return res.json({ ok: true, skipped: 'weekend' });
   const { to_email = 'administrator@quantumsurety.bond' } = req.body;
@@ -420,11 +420,11 @@ dripRouter.post('/alert', async (req, res) => {
     await sendEmail({
       from: 'Quantum Surety CRM <info@quantumsurety.bond>',
       to: to_email,
-      subject: `${notaries.length} Texas Notaries Expiring in 30 Days — ${new Date().toLocaleDateString()}`,
+      subject: `${notaries.length} Texas Notaries Expiring in 30 Days â€” ${new Date().toLocaleDateString()}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:24px">
           <div style="border-bottom:3px solid #C9A84C;margin-bottom:24px;padding-bottom:12px">
-            <h2 style="margin:0;color:#0A0A0F">Quantum Surety CRM — Daily Alert</h2>
+            <h2 style="margin:0;color:#0A0A0F">Quantum Surety CRM â€” Daily Alert</h2>
             <p style="margin:4px 0 0;color:#666">${notaries.length} notaries with bonds expiring in 30 days</p>
           </div>
           <table style="width:100%;border-collapse:collapse">
@@ -447,7 +447,7 @@ dripRouter.post('/alert', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── AUTO-PIPELINE ─────────────────────────────────────────────────────────────
+// â”€â”€ AUTO-PIPELINE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Nightly job: add anyone who opened/clicked a drip email in the last 25h to leads
 
 dripRouter.post('/auto-pipeline', async (req, res) => {
@@ -459,7 +459,7 @@ dripRouter.post('/auto-pipeline', async (req, res) => {
         c.company_name, c.email,
         CASE WHEN c.phone ~ '^[0-9]' THEN c.phone ELSE '' END,
         'Texas Contractor License Bond',
-        'auto-pipeline — drip open/click',
+        'auto-pipeline â€” drip open/click',
         'new',
         'Auto-added ' || TO_CHAR(NOW() AT TIME ZONE 'America/Chicago','Mon DD') ||
           ': opened/clicked contractor email. HUB certified, ' || c.city || ' TX.',
@@ -481,7 +481,7 @@ dripRouter.post('/auto-pipeline', async (req, res) => {
       SELECT DISTINCT ON (n.email)
         n.first_name || ' ' || n.last_name, n.email, '',
         'Texas Notary Bond',
-        'auto-pipeline — drip open/click',
+        'auto-pipeline â€” drip open/click',
         'new',
         'Auto-added ' || TO_CHAR(NOW() AT TIME ZONE 'America/Chicago','Mon DD') ||
           ': opened/clicked notary email. Expires: ' ||
@@ -504,7 +504,7 @@ dripRouter.post('/auto-pipeline', async (req, res) => {
       SELECT DISTINCT ON (d.email)
         d.business_name, d.email, COALESCE(d.phone,''),
         'Texas GDN Dealer Bond',
-        'auto-pipeline — drip open/click',
+        'auto-pipeline â€” drip open/click',
         'new',
         'Auto-added ' || TO_CHAR(NOW() AT TIME ZONE 'America/Chicago','Mon DD') ||
           ': opened/clicked dealer email. License expires: ' ||
@@ -530,7 +530,7 @@ dripRouter.post('/auto-pipeline', async (req, res) => {
   }
 });
 
-// ── CAMPAIGN ANALYTICS ────────────────────────────────────────────────────────
+// â”€â”€ CAMPAIGN ANALYTICS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 dripRouter.get('/analytics', async (req, res) => {
   const providedKey = req.headers['x-api-key'] || req.query.key;
